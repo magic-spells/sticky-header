@@ -1,0 +1,68 @@
+{
+	"name": "@magic-spells/sticky-header",
+	"version": "0.1.0",
+	"description": "Scroll-following sticky header web component — the header tracks the scroll 1:1 and settles to shown or hidden on idle, with sticky-content riders, breakpoint gating, and lock support, no dependencies",
+	"author": "Cory Schulz",
+	"license": "MIT",
+	"type": "module",
+	"main": "dist/sticky-header.esm.js",
+	"module": "dist/sticky-header.esm.js",
+	"unpkg": "dist/sticky-header.min.js",
+	"style": "dist/sticky-header.min.css",
+	"exports": {
+		".": {
+			"import": "./dist/sticky-header.esm.js",
+			"default": "./dist/sticky-header.esm.js"
+		},
+		"./css": "./dist/sticky-header.css",
+		"./css/min": "./dist/sticky-header.min.css"
+	},
+	"sideEffects": true,
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/magic-spells/sticky-header"
+	},
+	"homepage": "https://github.com/magic-spells/sticky-header#readme",
+	"bugs": {
+		"url": "https://github.com/magic-spells/sticky-header/issues"
+	},
+	"keywords": [
+		"sticky-header",
+		"hide-on-scroll",
+		"scroll",
+		"header",
+		"sticky",
+		"reveal",
+		"web-components",
+		"custom-elements"
+	],
+	"files": [
+		"dist/"
+	],
+	"scripts": {
+		"build": "NODE_ENV=production node scripts/build.mjs",
+		"dev": "NODE_ENV=development node scripts/build.mjs",
+		"lint": "eslint src/ scripts/",
+		"format": "prettier --write .",
+		"prepublishOnly": "npm run build"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	},
+	"browserslist": [
+		"last 2 versions",
+		"not dead",
+		"not ie <= 11"
+	],
+	"devDependencies": {
+		"@eslint/js": "^9.38.0",
+		"@magic-spells/vite-plugin-live-reload": "^0.1.0",
+		"eslint": "^9.38.0",
+		"globals": "^15.15.0",
+		"lightningcss": "^1.29.3",
+		"prettier": "^3.3.3",
+		"terser": "^5.16.0",
+		"vite": "^8.0.10"
+	}
+}

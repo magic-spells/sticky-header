@@ -1,0 +1,38 @@
+:root {
+  --header-group-offset: 0px;
+  --header-reveal-offset: 0px;
+  --sticky-header-z-index: 100;
+  --sticky-content-z-index: 10;
+}
+
+sticky-header {
+  z-index: var(--sticky-header-z-index);
+  transform: translateY(var(--header-group-offset, 0px));
+  will-change: transform;
+  display: block;
+  position: sticky;
+  top: 0;
+}
+
+sticky-header:before {
+  content: "";
+  background: inherit;
+  pointer-events: none;
+  height: 2rem;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+}
+
+sticky-content {
+  top: calc(var(--sticky-content-top, var(--header-group-height, 0px)) + var(--header-group-offset, 0px));
+  z-index: var(--sticky-content-z-index);
+  display: block;
+  position: sticky;
+}
+
+sticky-content[disabled] {
+  top: var(--sticky-content-top, var(--header-group-height, 0px));
+}
+/*$vite$:1*/

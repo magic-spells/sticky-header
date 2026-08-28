@@ -1,0 +1,1585 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Sticky Header — @magic-spells</title>
+
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Outfit:wght@200;300;400;500&display=swap"
+			rel="stylesheet" />
+		<link rel="stylesheet" href="dist/sticky-header.min.css" />
+		<!-- sibling package, via published npm build on the CDN -->
+		<link
+			rel="stylesheet"
+			href="https://unpkg.com/@magic-spells/split-text@0.2.0/dist/split-text.min.css" />
+		<script defer src="https://unpkg.com/@magic-spells/split-text@0.2.0"></script>
+		<link
+			rel="stylesheet"
+			href="https://unpkg.com/@magic-spells/dropdown-panel@1.0.0/dist/dropdown-panel.min.css" />
+		<script defer src="https://unpkg.com/@magic-spells/dropdown-panel@1.0.0"></script>
+
+		<style>
+			:root {
+				--bg-deep: #07060b;
+				--bg-card: #0f0e14;
+				--bg-raise: #15141c;
+				--border: #1e1c28;
+				--border-accent: #2a2636;
+				--accent: #818cf8;
+				--accent-mid: #6366f1;
+				--accent-deep: #4338ca;
+				--accent-glow: rgba(99, 102, 241, 0.16);
+				--cream: #f6f2e8;
+				--text: #f2efe6;
+				/* secondary text — kept well above WCAG AA on the dark ground */
+				--text-dim: #d2ccbe;
+				--font-display: 'Cormorant Garamond', Georgia, serif;
+				--font-body: 'Outfit', system-ui, sans-serif;
+				--font-mono: 'Courier New', monospace;
+			}
+
+			* {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+			}
+
+			html {
+				background: var(--bg-deep);
+				scroll-behavior: smooth;
+			}
+
+			body {
+				font-family: var(--font-body);
+				font-weight: 300;
+				color: var(--text);
+				background: var(--bg-deep);
+				-webkit-font-smoothing: antialiased;
+			}
+
+			/* ---- The header group ---- */
+
+			sticky-header {
+				/* the ::before bounce cap inherits this, so it must live here */
+				background: var(--bg-card);
+				border-bottom: 1px solid var(--border);
+			}
+
+			/* Untagged: it is above the reveal boundary, so it is top-only. */
+			.countdown {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				gap: 0.6rem;
+				padding: 0.5rem 1.5rem;
+				background: #1a1830;
+				color: var(--cream);
+				font-family: var(--font-mono);
+				font-size: 0.68rem;
+				letter-spacing: 0.1em;
+				text-transform: uppercase;
+				border-bottom: 1px solid var(--border);
+			}
+
+			.countdown b {
+				color: var(--accent);
+				font-weight: 400;
+			}
+
+			.announcement {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				gap: 1rem;
+				padding: 0.6rem 1.5rem;
+				background: var(--accent-deep);
+				color: #eef2ff;
+				font-size: 0.75rem;
+				letter-spacing: 0.14em;
+				text-transform: uppercase;
+			}
+
+			.announcement[hidden] {
+				display: none;
+			}
+
+			.site-header {
+				position: relative;
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 1.5rem;
+				padding: 1.1rem 1.75rem;
+			}
+
+			.brand {
+				font-family: var(--font-display);
+				font-size: 1.5rem;
+				color: var(--cream);
+				letter-spacing: -0.01em;
+			}
+
+			/* centred on the header itself, so unequal brand and button widths
+			   can't push it off-centre */
+			.site-nav {
+				position: absolute;
+				left: 50%;
+				transform: translateX(-50%);
+				display: flex;
+				align-items: center;
+				gap: 1.75rem;
+				font-size: 0.85rem;
+			}
+
+			.site-nav a {
+				color: var(--text-dim);
+				text-decoration: none;
+				transition: color 0.25s ease;
+			}
+
+			.site-nav a:hover {
+				color: var(--accent);
+			}
+
+			@media (max-width: 720px) {
+				.site-nav {
+					display: none;
+				}
+			}
+
+			/* ---- Dropdown (sibling package, via CDN) ---- */
+
+			dropdown-trigger {
+				display: inline-flex;
+				align-items: center;
+				gap: 0.35em;
+				color: var(--text-dim);
+				font-size: 0.85rem;
+				cursor: pointer;
+				transition: color 0.25s ease;
+			}
+
+			dropdown-trigger[aria-expanded='true'],
+			dropdown-trigger:hover {
+				color: var(--accent);
+			}
+
+			/* caret inherits currentColor, so it tracks the trigger's hover/open color */
+			.nav-caret {
+				flex: none;
+				transition: transform 0.25s ease;
+			}
+
+			dropdown-trigger[aria-expanded='true'] .nav-caret {
+				transform: rotate(180deg);
+			}
+
+			dropdown-panel {
+				min-width: 12rem;
+				margin-top: 6px;
+				padding: 0.4rem;
+				background: var(--bg-raise);
+				border: 1px solid var(--border-accent);
+				border-radius: 10px;
+			}
+
+			.dropdown-item {
+				display: block;
+				padding: 0.5rem 0.75rem;
+				border-radius: 6px;
+				color: var(--text);
+				font-size: 0.82rem;
+				text-decoration: none;
+			}
+
+			.dropdown-item:hover {
+				background: var(--accent-deep);
+				color: #eef2ff;
+			}
+
+			/* ---- Riders ---- */
+
+			.rider {
+				background: var(--bg-raise);
+				border: 1px solid var(--border);
+				border-radius: 10px;
+				padding: 0.85rem 1.25rem;
+				margin: 0 0 2rem;
+				font-size: 0.8rem;
+				letter-spacing: 0.1em;
+				text-transform: uppercase;
+				color: var(--text-dim);
+				transition:
+					border-color 0.3s ease,
+					color 0.3s ease;
+			}
+
+			.rider[stuck] {
+				border-color: var(--accent-mid);
+				color: var(--accent);
+			}
+
+			.rider .rider-state::after {
+				content: 'in flow';
+			}
+
+			.rider[stuck] .rider-state::after {
+				content: 'stuck';
+			}
+
+			/* ---- Page content ---- */
+
+			main {
+				max-width: 940px;
+				margin: 0 auto;
+				padding: 0 1.5rem 8rem;
+			}
+
+			.hero {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: center;
+				text-align: center;
+				min-height: 78vh;
+				padding: 4rem 0;
+			}
+
+			.hero h1 {
+				font-family: var(--font-display);
+				font-weight: 300;
+				font-size: clamp(2.5rem, 7vw, 5rem);
+				line-height: 1.05;
+				color: var(--cream);
+				letter-spacing: -0.02em;
+				margin-bottom: 1.5rem;
+			}
+
+			.hero h1 em {
+				font-style: italic;
+				color: var(--accent);
+			}
+
+			.hero p {
+				max-width: 34rem;
+				font-size: 1.05rem;
+				line-height: 1.7;
+				text-wrap: pretty;
+			}
+
+			.hero code {
+				font-family: var(--font-mono);
+				font-size: 0.85rem;
+				color: var(--accent);
+				background: var(--bg-card);
+				border: 1px solid var(--border);
+				border-radius: 8px;
+				padding: 0.5em 1.2em;
+				margin-top: 2.5rem;
+				user-select: all;
+			}
+
+			.hero .install-size {
+				margin-top: 0.85rem;
+				font-family: var(--font-mono);
+				font-size: 0.75rem;
+				letter-spacing: 0.06em;
+				color: var(--cream);
+			}
+
+			.screen {
+				min-height: 88vh;
+				padding: 4rem 0;
+				border-top: 1px solid var(--border);
+				scroll-margin-top: calc(var(--header-group-height, 0px) + 1rem);
+			}
+
+			/* ---- Feature checklist ---- */
+
+			.features {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+				gap: 0.6rem 2rem;
+				margin-top: 2rem;
+				list-style: none;
+			}
+
+			.features li {
+				display: flex;
+				align-items: baseline;
+				gap: 0.7rem;
+				font-size: 0.95rem;
+				line-height: 1.6;
+				color: var(--text);
+			}
+
+			.features li::before {
+				content: '✓';
+				flex: none;
+				color: var(--accent);
+				font-size: 0.85rem;
+			}
+
+			/* ---- Content blocks: scroll runway for the component ---- */
+
+			.block {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+				gap: 1rem;
+				align-content: center;
+				min-height: 88vh;
+				padding: 4rem 0;
+				border-top: 1px solid var(--border);
+				scroll-margin-top: calc(var(--header-group-height, 0px) + 1rem);
+			}
+
+			.tile {
+				min-height: 15rem;
+				border: 1px solid var(--border-accent);
+				border-radius: 14px;
+				background:
+					radial-gradient(130% 100% at 20% 0%, rgba(99, 102, 241, 0.3), transparent 62%),
+					var(--bg-card);
+			}
+
+			.tile:nth-child(even) {
+				background:
+					radial-gradient(130% 100% at 80% 100%, rgba(99, 102, 241, 0.22), transparent 62%),
+					var(--bg-raise);
+			}
+
+			.screen h2 {
+				font-family: var(--font-display);
+				font-weight: 300;
+				font-size: 2.25rem;
+				color: var(--cream);
+				margin-bottom: 1.25rem;
+			}
+
+			.screen p {
+				max-width: 42rem;
+				line-height: 1.8;
+				color: var(--text);
+				margin-bottom: 1rem;
+				text-wrap: pretty;
+			}
+
+			/* ---- Code block + API reference ---- */
+
+			.code-block {
+				overflow-x: auto;
+				background: var(--bg-card);
+				border: 1px solid var(--border);
+				border-radius: 14px;
+			}
+
+			.code-block pre {
+				margin: 0;
+				padding: 1.35rem 1.4rem;
+			}
+
+			.code-block code {
+				font-family: var(--font-mono);
+				font-size: 0.78rem;
+				line-height: 1.75;
+				color: var(--text);
+				white-space: pre;
+			}
+
+			.code-block .kw {
+				color: var(--accent);
+			}
+
+			.code-block .str {
+				color: var(--cream);
+			}
+
+			/* comments read as comments by hue, not by being dim */
+			.code-block .cm {
+				color: #c5bfe2;
+			}
+
+			.api h3 {
+				font-family: var(--font-mono);
+				font-weight: 400;
+				font-size: 0.65rem;
+				letter-spacing: 0.18em;
+				text-transform: uppercase;
+				color: var(--accent);
+				margin: 2.5rem 0 0.75rem;
+			}
+
+			.api h3:first-of-type {
+				margin-top: 0;
+			}
+
+			.api-scroll {
+				overflow-x: auto;
+				background: var(--bg-card);
+				border: 1px solid var(--border);
+				border-radius: 14px;
+			}
+
+			.api-table {
+				width: 100%;
+				min-width: 42rem;
+				border-collapse: collapse;
+				text-align: left;
+			}
+
+			.api-table th {
+				padding: 0.8rem 1.2rem;
+				font-family: var(--font-mono);
+				font-weight: 400;
+				font-size: 0.62rem;
+				letter-spacing: 0.16em;
+				text-transform: uppercase;
+				color: var(--accent);
+				border-bottom: 1px solid var(--border);
+			}
+
+			.api-table td {
+				padding: 0.75rem 1.2rem;
+				font-size: 0.85rem;
+				line-height: 1.6;
+				color: var(--text);
+				vertical-align: top;
+				border-bottom: 1px solid var(--border);
+			}
+
+			.api-table tr:last-child td {
+				border-bottom: 0;
+			}
+
+			/* the four-column attribute tables: keep the short value column on one line */
+			.api-table.attrs td:nth-child(2),
+			.api-table.attrs td:nth-child(3) {
+				white-space: nowrap;
+			}
+
+			.api-table code {
+				font-family: var(--font-mono);
+				font-size: 0.76rem;
+				color: var(--accent);
+				white-space: nowrap;
+			}
+
+			.api-table td:first-child {
+				white-space: nowrap;
+			}
+
+			/* ---- Dialog (lock test) ---- */
+
+			dialog {
+				border: 1px solid var(--border-accent);
+				border-radius: 14px;
+				background: var(--bg-card);
+				color: var(--text);
+				padding: 2rem;
+				max-width: 26rem;
+				font-family: var(--font-body);
+			}
+
+			dialog::backdrop {
+				background: rgba(7, 6, 11, 0.72);
+			}
+
+			dialog h3 {
+				font-family: var(--font-display);
+				font-weight: 400;
+				font-size: 1.6rem;
+				color: var(--cream);
+				margin-bottom: 0.75rem;
+			}
+
+			dialog p {
+				font-size: 0.9rem;
+				line-height: 1.7;
+				color: var(--text-dim);
+				margin-bottom: 1.5rem;
+			}
+
+			/* ---- Lock-selector target ---- */
+
+			.lock-panel {
+				position: fixed;
+				left: 1rem;
+				bottom: 1rem;
+				z-index: 400;
+				display: none;
+				padding: 0.75rem 1.1rem;
+				background: var(--accent-deep);
+				color: #eef2ff;
+				border-radius: 10px;
+				font-size: 0.72rem;
+				letter-spacing: 0.1em;
+				text-transform: uppercase;
+			}
+
+			.lock-panel[data-open] {
+				display: block;
+			}
+
+			/* ---- Buttons ---- */
+
+			button,
+			.btn {
+				font-family: var(--font-body);
+				font-weight: 400;
+				font-size: 0.75rem;
+				letter-spacing: 0.08em;
+				color: var(--text);
+				background: var(--bg-raise);
+				border: 1px solid var(--border-accent);
+				border-radius: 7px;
+				padding: 0.45em 0.85em;
+				cursor: pointer;
+				transition:
+					border-color 0.2s ease,
+					color 0.2s ease;
+			}
+
+			button:hover {
+				border-color: var(--accent-mid);
+				color: var(--accent);
+			}
+
+			/* ---- Controls panel ---- */
+
+			.controls {
+				position: fixed;
+				right: 1rem;
+				bottom: 1rem;
+				z-index: 500;
+				width: 20rem;
+				max-height: calc(100vh - 2rem);
+				display: flex;
+				flex-direction: column;
+				background: rgba(15, 14, 20, 0.94);
+				backdrop-filter: blur(12px);
+				border: 1px solid var(--border-accent);
+				border-radius: 12px;
+				font-size: 0.72rem;
+			}
+
+			.controls-head {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				padding: 0.75rem 0.9rem;
+				border-bottom: 1px solid var(--border);
+				font-family: var(--font-mono);
+				font-size: 0.65rem;
+				letter-spacing: 0.18em;
+				text-transform: uppercase;
+				color: var(--accent);
+			}
+
+			.controls-body {
+				overflow-y: auto;
+				padding: 0.9rem;
+				display: flex;
+				flex-direction: column;
+				gap: 0.9rem;
+			}
+
+			.controls[collapsed] .controls-body {
+				display: none;
+			}
+
+			/* collapsed: nothing but the toggle, a small pill in the corner */
+			.controls[collapsed] {
+				width: auto;
+			}
+
+			.controls[collapsed] .controls-head {
+				padding: 0.4rem;
+				border-bottom: 0;
+			}
+
+			.controls[collapsed] .controls-title {
+				display: none;
+			}
+
+			.field {
+				display: flex;
+				flex-direction: column;
+				gap: 0.35rem;
+			}
+
+			.field > label,
+			.group-label {
+				font-size: 0.62rem;
+				letter-spacing: 0.16em;
+				text-transform: uppercase;
+				color: var(--text-dim);
+			}
+
+			.field-value {
+				font-family: var(--font-mono);
+				color: var(--accent);
+			}
+
+			.radios {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.35rem;
+			}
+
+			.radios label {
+				display: flex;
+				align-items: center;
+				gap: 0.3rem;
+				padding: 0.3em 0.55em;
+				border: 1px solid var(--border);
+				border-radius: 6px;
+				cursor: pointer;
+			}
+
+			.radios input {
+				accent-color: var(--accent);
+			}
+
+			.radios label:has(input:checked) {
+				border-color: var(--accent-mid);
+				color: var(--accent);
+			}
+
+			input[type='range'] {
+				width: 100%;
+				accent-color: var(--accent);
+			}
+
+			input[type='number'] {
+				width: 100%;
+				font-family: var(--font-mono);
+				font-size: 0.72rem;
+				color: var(--text);
+				background: var(--bg-deep);
+				border: 1px solid var(--border);
+				border-radius: 6px;
+				padding: 0.35em 0.5em;
+			}
+
+			.buttons {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.35rem;
+			}
+
+			.divider {
+				height: 1px;
+				background: var(--border);
+			}
+
+			/* ---- Readout ---- */
+
+			.readout {
+				display: grid;
+				grid-template-columns: auto 1fr;
+				gap: 0.25rem 0.75rem;
+				font-family: var(--font-mono);
+				font-size: 0.68rem;
+			}
+
+			.readout dt {
+				color: var(--text-dim);
+			}
+
+			.readout dd {
+				color: var(--cream);
+				text-align: right;
+			}
+
+			.meter {
+				position: relative;
+				height: 0.5rem;
+				background: var(--bg-deep);
+				border: 1px solid var(--border);
+				border-radius: 4px;
+				overflow: hidden;
+			}
+
+			.meter-fill {
+				position: absolute;
+				inset: 0 auto 0 0;
+				width: 0%;
+				background: var(--accent);
+			}
+
+			.meter-threshold {
+				position: absolute;
+				top: 0;
+				bottom: 0;
+				width: 1px;
+				left: 50%;
+				background: var(--cream);
+			}
+
+			/* where the reveal stop sits on the same 0 → 1 travel */
+			.meter-reveal {
+				position: absolute;
+				top: 0;
+				bottom: 0;
+				width: 1px;
+				left: 0%;
+				background: var(--accent-mid);
+			}
+
+			@media (max-width: 720px) {
+				.controls {
+					width: auto;
+					left: 1rem;
+				}
+			}
+		</style>
+	</head>
+
+	<body>
+		<!--
+			The sliding group: countdown + announcement + header, all inside the
+			host. `data-sticky-reveal` marks what a mid-page scroll UP brings back;
+			the countdown carries no tag, so it is top-only — visible near the page
+			top and nowhere else.
+		-->
+		<sticky-header
+			id="header"
+			hide-on-scroll="both"
+			breakpoint="1024"
+			reveal-threshold="100"
+			settle-threshold="0.5"
+			settle-duration="900"
+			settle-overshoot="0.05"
+			hover-lock
+			lock="dropdown-trigger[aria-expanded='true'], #lock-panel[data-open]">
+			<div class="countdown" id="countdown-bar">
+				<b>12 hrs left</b>
+				<span>sale ends soon</span>
+			</div>
+			<div class="announcement" id="announcement-bar" data-announcement data-sticky-reveal="mobile">
+				<span>Free shipping on everything · ends Sunday</span>
+			</div>
+			<header class="site-header" data-sticky-reveal>
+				<span class="brand">Sticky&nbsp;Header</span>
+				<nav class="site-nav">
+					<a href="#usage">Features</a>
+					<a href="#api">API</a>
+					<a href="#block-4">Gallery</a>
+					<a href="#block-10">Bottom</a>
+					<dropdown-component>
+						<dropdown-trigger>
+							More
+							<svg class="nav-caret" width="9" height="6" viewBox="0 0 9 6" aria-hidden="true">
+								<path
+									d="M1 1.25 4.5 4.75 8 1.25"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.4"
+									stroke-linecap="round"
+									stroke-linejoin="round" />
+							</svg>
+						</dropdown-trigger>
+						<dropdown-panel>
+							<a class="dropdown-item" href="#usage">Features</a>
+							<a class="dropdown-item" href="#api">API</a>
+							<a class="dropdown-item" href="#block-2">Gallery</a>
+							<a class="dropdown-item" href="#block-8">Far down</a>
+						</dropdown-panel>
+					</dropdown-component>
+				</nav>
+				<button type="button" data-action-menu>Menu</button>
+			</header>
+		</sticky-header>
+
+		<main>
+			<section class="hero">
+				<h1>
+					<split-text split="chars" trigger="load" stagger="26" duration="820">
+						Follows your <em>scroll</em>
+					</split-text>
+				</h1>
+				<p>
+					The header translates at exactly the rate you scroll — no easing, no lag, no trigger
+					points. When scrolling stops it settles to fully shown or fully hidden, whichever side of
+					the threshold it landed on.
+				</p>
+				<code>npm install @magic-spells/sticky-header</code>
+				<p class="install-size">6.1 kB JS gzip · 0.3 kB CSS gzip</p>
+			</section>
+
+			<!-- Rider A: shallow. Pins early, while the header is usually visible. -->
+			<sticky-content class="rider" id="rider-a">
+				Rider A · top = group height · <span class="rider-state"></span>
+			</sticky-content>
+
+			<section class="screen" id="usage">
+				<h2>Everything you need</h2>
+				<div class="code-block">
+					<pre><code><span class="cm">&lt;!-- or from npm: import '@magic-spells/sticky-header' + '/css' --&gt;</span>
+&lt;<span class="kw">link</span> rel=<span class="str">"stylesheet"</span>
+      href=<span class="str">"https://unpkg.com/@magic-spells/sticky-header/dist/sticky-header.min.css"</span>&gt;
+&lt;<span class="kw">script</span> src=<span class="str">"https://unpkg.com/@magic-spells/sticky-header"</span>&gt;&lt;/<span class="kw">script</span>&gt;
+
+&lt;<span class="kw">style</span>&gt;
+  <span class="cm">/* the bounce cap inherits this, so it belongs on the host */</span>
+  sticky-header { background: #0f0e14; }
+&lt;/<span class="kw">style</span>&gt;
+
+&lt;<span class="kw">sticky-header</span> hide-on-scroll=<span class="str">"both"</span> breakpoint=<span class="str">"1024"</span> hover-lock&gt;
+  <span class="cm">&lt;!-- no tag: top-only. Leaves with the page, back near the top --&gt;</span>
+  &lt;div class=<span class="str">"countdown"</span>&gt;12 hrs left&lt;/div&gt;
+
+  <span class="cm">&lt;!-- tagged for mobile: comes back on a scroll up, small screens only --&gt;</span>
+  &lt;div data-announcement <span class="kw">data-sticky-reveal</span>=<span class="str">"mobile"</span>&gt;Free shipping&lt;/div&gt;
+
+  <span class="cm">&lt;!-- bare tag = both. The reveal boundary on desktop --&gt;</span>
+  &lt;header <span class="kw">data-sticky-reveal</span>&gt;
+    &lt;a href=<span class="str">"/"</span>&gt;Brand&lt;/a&gt;
+    &lt;nav&gt;…&lt;/nav&gt;
+  &lt;/header&gt;
+&lt;/<span class="kw">sticky-header</span>&gt;
+
+&lt;<span class="kw">sticky-content</span>&gt;
+  &lt;nav class=<span class="str">"section-tabs"</span>&gt;…&lt;/nav&gt;  <span class="cm">&lt;!-- pins below, rides the offset --&gt;</span>
+&lt;/<span class="kw">sticky-content</span>&gt;</code></pre>
+				</div>
+
+				<ul class="features">
+					<li>Follows the scroll 1:1 — no trigger points, no lag</li>
+					<li>Settles to a stop on scroll rest, with a tunable bounce</li>
+					<li>Scroll-up reveal boundaries via <code>data-sticky-reveal</code></li>
+					<li>Top-only bars glide away and come back at the same position</li>
+					<li>Hides per breakpoint — mobile, desktop, both or never</li>
+					<li>Hover-lock, <code>dialog[open]</code> and any selector you name</li>
+					<li><code>&lt;sticky-content&gt;</code> riders pin below and ride the offset</li>
+					<li>Live geometry in CSS variables at every breakpoint</li>
+					<li>Reduced-motion fallback, no CSS transitions to fight</li>
+					<li>Light DOM and plain custom properties — style it with your own CSS</li>
+				</ul>
+			</section>
+
+			<section class="screen api" id="api">
+				<h2>API</h2>
+
+				<h3>&lt;sticky-header&gt; attributes</h3>
+				<div class="api-scroll">
+					<table class="api-table attrs">
+						<thead>
+							<tr>
+								<th scope="col">Attribute</th>
+								<th scope="col">Values</th>
+								<th scope="col">Default</th>
+								<th scope="col">Description</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td><code>hide-on-scroll</code></td>
+								<td><code>none mobile desktop both</code></td>
+								<td><code>both</code></td>
+								<td>
+									Which viewports hide on scroll. Height variables are maintained in every mode
+								</td>
+							</tr>
+							<tr>
+								<td><code>breakpoint</code></td>
+								<td>px number</td>
+								<td><code>1024</code></td>
+								<td>
+									The desktop cutoff. <code>desktop</code> matches <code>(min-width: bp)</code>;
+									<code>mobile</code> is everything narrower
+								</td>
+							</tr>
+							<tr>
+								<td><code>reveal-threshold</code></td>
+								<td>px</td>
+								<td><code>100</code></td>
+								<td>Within this distance of the page top the header is always fully visible</td>
+							</tr>
+							<tr>
+								<td><code>settle-threshold</code></td>
+								<td><code>0</code>–<code>1</code></td>
+								<td><code>0.5</code></td>
+								<td>
+									How far into the gap between the two adjacent stops an idle settle commits to the
+									hidden one rather than back to the reveal stop
+								</td>
+							</tr>
+							<tr>
+								<td><code>settle-duration</code></td>
+								<td>ms</td>
+								<td><code>900</code></td>
+								<td>Hide settle duration; the show settle uses 85% of it</td>
+							</tr>
+							<tr>
+								<td><code>settle-overshoot</code></td>
+								<td><code>0</code>–<code>0.2</code></td>
+								<td><code>0.05</code></td>
+								<td>
+									Bounce amplitude. <code>0</code> swaps to a critically damped curve — no bounce
+								</td>
+							</tr>
+							<tr>
+								<td><code>hover-lock</code></td>
+								<td>boolean</td>
+								<td>—</td>
+								<td>While the pointer is anywhere in the header group, don't hide on scroll</td>
+							</tr>
+							<tr>
+								<td><code>lock</code></td>
+								<td>CSS selector</td>
+								<td>—</td>
+								<td>
+									Extra force-show condition, e.g. an open menu panel. <code>dialog[open]</code> is
+									built in
+								</td>
+							</tr>
+							<tr>
+								<td><code>locked</code></td>
+								<td>boolean</td>
+								<td>—</td>
+								<td>Force fully visible</td>
+							</tr>
+							<tr>
+								<td><code>disabled</code></td>
+								<td>boolean</td>
+								<td>—</td>
+								<td>Turn tracking off entirely (height variables are still maintained)</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<h3>Descendant attributes — the reveal boundary</h3>
+				<div class="api-scroll">
+					<table class="api-table attrs">
+						<thead>
+							<tr>
+								<th scope="col">Attribute</th>
+								<th scope="col">Values</th>
+								<th scope="col">On</th>
+								<th scope="col">Description</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td><code>data-sticky-reveal</code></td>
+								<td><code>both mobile desktop none</code>, or bare</td>
+								<td>Any descendant</td>
+								<td>
+									Comes back on a mid-page scroll up. The <strong>topmost active</strong> tag is the
+									boundary; everything above it is top-only. Bare = <code>both</code>;
+									<code>none</code> and unrecognized values are inactive; an element with no box is
+									skipped
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<h3>&lt;sticky-content&gt; attributes</h3>
+				<div class="api-scroll">
+					<table class="api-table attrs">
+						<thead>
+							<tr>
+								<th scope="col">Attribute</th>
+								<th scope="col">Values</th>
+								<th scope="col">Default</th>
+								<th scope="col">Description</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td><code>top</code></td>
+								<td>CSS length</td>
+								<td><code>--header-group-height</code></td>
+								<td>Resting sticky inset. Sugar for setting <code>--sticky-content-top</code></td>
+							</tr>
+							<tr>
+								<td><code>disabled</code></td>
+								<td>boolean</td>
+								<td>—</td>
+								<td>
+									Stop riding the header; pin at the static resting inset instead.
+									<code>stuck</code> is no longer applied
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<h3>Custom properties — written on &lt;body&gt;</h3>
+				<div class="api-scroll">
+					<table class="api-table">
+						<thead>
+							<tr>
+								<th scope="col">Property</th>
+								<th scope="col">Description</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td><code>--header-group-offset</code></td>
+								<td>
+									<strong>The rider hook.</strong> Per frame, <code>0</code> → −(group height);
+									briefly a little past <code>0</code> during the show bounce
+								</td>
+							</tr>
+							<tr>
+								<td><code>--header-group-height</code></td>
+								<td>Total height of the sliding group</td>
+							</tr>
+							<tr>
+								<td><code>--header-height</code></td>
+								<td>The header alone, without the announcement bar</td>
+							</tr>
+							<tr>
+								<td><code>--announcement-bar-height</code></td>
+								<td>The <code>data-announcement</code> child, when there is one</td>
+							</tr>
+							<tr>
+								<td><code>--header-reveal-offset</code></td>
+								<td>
+									The middle resting stop — −(distance from the group top to the reveal boundary).
+									<code>0px</code> with nothing tagged
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<h3>Custom properties — set by you</h3>
+				<div class="api-scroll">
+					<table class="api-table">
+						<thead>
+							<tr>
+								<th scope="col">Property</th>
+								<th scope="col">Default</th>
+								<th scope="col">Description</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td><code>--sticky-content-top</code></td>
+								<td><code>--header-group-height</code></td>
+								<td>A rider's resting inset</td>
+							</tr>
+							<tr>
+								<td><code>--sticky-header-z-index</code></td>
+								<td><code>100</code></td>
+								<td>Header stacking order</td>
+							</tr>
+							<tr>
+								<td><code>--sticky-content-z-index</code></td>
+								<td><code>10</code></td>
+								<td>Rider stacking order</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<h3>State attributes</h3>
+				<div class="api-scroll">
+					<table class="api-table">
+						<thead>
+							<tr>
+								<th scope="col">Attribute</th>
+								<th scope="col">On</th>
+								<th scope="col">When</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td><code>data-state="top|scrolling"</code></td>
+								<td><code>&lt;body&gt;</code></td>
+								<td>Within 8px of the page top, or not</td>
+							</tr>
+							<tr>
+								<td><code>data-header-hidden</code></td>
+								<td><code>&lt;body&gt;</code></td>
+								<td>Settled fully hidden — never mid-transition</td>
+							</tr>
+							<tr>
+								<td><code>data-header-revealed</code></td>
+								<td><code>&lt;body&gt;</code></td>
+								<td>Settled at the reveal stop, with a boundary strictly inside the group</td>
+							</tr>
+							<tr>
+								<td><code>data-header-tracking</code></td>
+								<td><code>&lt;body&gt;</code></td>
+								<td>Tracking or settling. Use it to suppress your own transitions</td>
+							</tr>
+							<tr>
+								<td><code>data-header-locked</code></td>
+								<td><code>&lt;body&gt;</code></td>
+								<td>A lock condition is holding the header visible</td>
+							</tr>
+							<tr>
+								<td><code>data-hidden</code> <code>data-tracking</code></td>
+								<td><code>&lt;sticky-header&gt;</code></td>
+								<td>Element-level mirrors of the above</td>
+							</tr>
+							<tr>
+								<td><code>stuck</code></td>
+								<td><code>&lt;sticky-content&gt;</code></td>
+								<td>The rider is pinned at its effective top — a styling hook</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<h3>Events — bubble, dispatched on &lt;sticky-header&gt;</h3>
+				<div class="api-scroll">
+					<table class="api-table attrs">
+						<thead>
+							<tr>
+								<th scope="col">Event</th>
+								<th scope="col">When</th>
+								<th scope="col">detail</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td><code>sticky-header:settle</code></td>
+								<td>A settle tween starts</td>
+								<td><code>{ target: 'show'|'hide', from, duration }</code></td>
+							</tr>
+							<tr>
+								<td><code>sticky-header:hide</code></td>
+								<td>Settled fully hidden</td>
+								<td>—</td>
+							</tr>
+							<tr>
+								<td><code>sticky-header:show</code></td>
+								<td>
+									Settled anywhere short of fully hidden — at a partial reveal stop this fires
+									alongside <code>reveal</code>
+								</td>
+								<td>—</td>
+							</tr>
+							<tr>
+								<td><code>sticky-header:reveal</code></td>
+								<td>Settled at the reveal stop</td>
+								<td>—</td>
+							</tr>
+							<tr>
+								<td><code>sticky-header:resize</code></td>
+								<td>Measured geometry changed</td>
+								<td><code>{ headerHeight, announcementHeight, groupHeight }</code></td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<h3>Properties and methods</h3>
+				<div class="api-scroll">
+					<table class="api-table">
+						<thead>
+							<tr>
+								<th scope="col">Member</th>
+								<th scope="col">On</th>
+								<th scope="col">Description</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td><code>offset</code></td>
+								<td><code>&lt;sticky-header&gt;</code></td>
+								<td>Current offset in px (<code>0</code> shown → −groupHeight hidden)</td>
+							</tr>
+							<tr>
+								<td><code>progress</code></td>
+								<td><code>&lt;sticky-header&gt;</code></td>
+								<td>Hidden fraction over the full travel, <code>0</code> → <code>1</code></td>
+							</tr>
+							<tr>
+								<td><code>revealOffset</code></td>
+								<td><code>&lt;sticky-header&gt;</code></td>
+								<td>The reveal stop in px, <code>0</code> with nothing tagged</td>
+							</tr>
+							<tr>
+								<td><code>isHidden</code></td>
+								<td><code>&lt;sticky-header&gt;</code></td>
+								<td>
+									Settled fully hidden. Named to avoid shadowing native
+									<code>HTMLElement.hidden</code>
+								</td>
+							</tr>
+							<tr>
+								<td><code>groupHeight</code></td>
+								<td><code>&lt;sticky-header&gt;</code></td>
+								<td>Measured height of the sliding group</td>
+							</tr>
+							<tr>
+								<td><code>show()</code> <code>hide()</code></td>
+								<td><code>&lt;sticky-header&gt;</code></td>
+								<td>
+									Settle fully visible / fully hidden (hide is ignored while locked or inactive)
+								</td>
+							</tr>
+							<tr>
+								<td><code>lock()</code> <code>unlock()</code></td>
+								<td><code>&lt;sticky-header&gt;</code></td>
+								<td>Toggle the <code>locked</code> attribute</td>
+							</tr>
+							<tr>
+								<td><code>refresh()</code></td>
+								<td><code>&lt;sticky-header&gt;</code></td>
+								<td>Re-measure geometry and rebase scroll tracking</td>
+							</tr>
+							<tr>
+								<td><code>stuck</code></td>
+								<td><code>&lt;sticky-content&gt;</code></td>
+								<td>Whether the rider is pinned at its effective top</td>
+							</tr>
+							<tr>
+								<td><code>top</code></td>
+								<td><code>&lt;sticky-content&gt;</code></td>
+								<td>Resting inset in px, excluding the header offset</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			<!-- Unlabeled content blocks: scroll runway for tracking, settling and the far rider. -->
+			<div class="block" id="block-1">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+
+			<div class="block" id="block-2">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+
+			<div class="block" id="block-3">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+
+			<div class="block" id="block-4">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+
+			<div class="block" id="block-5">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+
+			<div class="block" id="block-6">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+
+			<!-- Rider B: far down the page, with a custom resting inset. -->
+			<!-- Clears Rider A, which stays pinned for the whole of <main>. -->
+			<sticky-content class="rider" id="rider-b" top="calc(var(--header-group-height, 0px) + 5rem)">
+				Rider B · top = group + 5rem · <span class="rider-state"></span>
+			</sticky-content>
+
+			<div class="block" id="block-7">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+
+			<div class="block" id="block-8">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+
+			<div class="block" id="block-9">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+
+			<div class="block" id="block-10">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+		</main>
+
+		<!-- Lock-selector target. The header's lock="#lock-panel[data-open]" force-shows
+		     while this carries data-open, standing in for an open nav panel. -->
+		<div id="lock-panel" class="lock-panel">Nav panel open — header locked visible</div>
+
+		<dialog id="menu-dialog">
+			<h3>Menu</h3>
+			<p>
+				While this dialog is open the header is locked fully visible. Scroll the page behind it —
+				the header will not move. Close it and normal tracking resumes from the current position.
+			</p>
+			<button type="button" data-action-close-dialog>Close</button>
+		</dialog>
+
+		<!-- starts collapsed: only the toggle shows until you open it -->
+		<aside class="controls" id="controls" collapsed>
+			<div class="controls-head">
+				<span class="controls-title">sticky-header</span>
+				<button type="button" data-action-collapse>controls</button>
+			</div>
+
+			<div class="controls-body">
+				<div class="field">
+					<span class="group-label">hide-on-scroll</span>
+					<div class="radios" id="hide-modes">
+						<label><input type="radio" name="hide" value="both" checked />both</label>
+						<label><input type="radio" name="hide" value="mobile" />mobile</label>
+						<label><input type="radio" name="hide" value="desktop" />desktop</label>
+						<label><input type="radio" name="hide" value="none" />none</label>
+					</div>
+				</div>
+
+				<div class="field">
+					<label for="breakpoint">breakpoint (px)</label>
+					<input type="number" id="breakpoint" value="1024" min="200" max="3000" step="1" />
+				</div>
+
+				<div class="divider"></div>
+
+				<div class="field">
+					<label for="reveal">
+						reveal-threshold <span class="field-value" id="reveal-value">100</span>
+					</label>
+					<input type="range" id="reveal" min="0" max="600" step="10" value="100" />
+				</div>
+
+				<div class="field">
+					<label for="threshold">
+						settle-threshold <span class="field-value" id="threshold-value">0.50</span>
+					</label>
+					<input type="range" id="threshold" min="0" max="1" step="0.01" value="0.5" />
+				</div>
+
+				<div class="field">
+					<label for="duration">
+						settle-duration <span class="field-value" id="duration-value">900ms</span>
+					</label>
+					<input type="range" id="duration" min="60" max="1500" step="10" value="900" />
+				</div>
+
+				<div class="field">
+					<label for="overshoot">
+						settle-overshoot <span class="field-value" id="overshoot-value">0.050</span>
+					</label>
+					<input type="range" id="overshoot" min="0" max="0.2" step="0.005" value="0.05" />
+				</div>
+
+				<div class="divider"></div>
+
+				<div class="buttons">
+					<button type="button" data-action-toggle-announcement>announcement</button>
+					<button type="button" data-action-toggle-disabled>disabled</button>
+					<button type="button" data-action-toggle-hover-lock>hover-lock</button>
+				</div>
+
+				<div class="buttons">
+					<button type="button" data-action-cycle-reveal>
+						bar tag: <span id="reveal-tag-value">mobile</span>
+					</button>
+				</div>
+
+				<div class="buttons">
+					<button type="button" data-action-toggle-lock>lock()</button>
+					<button type="button" data-action-toggle-panel>lock selector</button>
+					<button type="button" data-action-open-dialog>dialog</button>
+					<button type="button" data-action-show>show()</button>
+					<button type="button" data-action-hide>hide()</button>
+				</div>
+
+				<div class="buttons">
+					<button type="button" data-action-scroll="0">top</button>
+					<button type="button" data-action-scroll="1200">jump 1200</button>
+					<button type="button" data-action-scroll="4000">jump 4000</button>
+					<button type="button" data-action-scroll="2500" data-smooth>smooth 2500</button>
+					<button type="button" data-action-scroll="end">bottom</button>
+				</div>
+
+				<div class="divider"></div>
+
+				<dl class="readout">
+					<dt>offset</dt>
+					<dd id="out-offset">0px</dd>
+					<dt>progress</dt>
+					<dd id="out-progress">0.000</dd>
+					<dt>motion</dt>
+					<dd id="out-motion">idle</dd>
+					<dt>data-state</dt>
+					<dd id="out-state">top</dd>
+					<dt>group</dt>
+					<dd id="out-group">0px</dd>
+					<dt>revealOffset</dt>
+					<dd id="out-reveal">0px</dd>
+				</dl>
+
+				<div class="meter">
+					<div class="meter-fill" id="meter-fill"></div>
+					<div class="meter-reveal" id="meter-reveal"></div>
+					<div class="meter-threshold" id="meter-threshold"></div>
+				</div>
+			</div>
+		</aside>
+
+		<script type="module" src="dist/sticky-header.esm.js"></script>
+		<script type="module">
+			const header = document.getElementById('header');
+			const body = document.body;
+			const dialog = document.getElementById('menu-dialog');
+			const announcement = document.getElementById('announcement-bar');
+			const lockPanel = document.getElementById('lock-panel');
+			// ---- attribute controls ----
+
+			document.getElementById('hide-modes').addEventListener('change', (e) => {
+				header.setAttribute('hide-on-scroll', e.target.value);
+			});
+
+			document.getElementById('breakpoint').addEventListener('input', (e) => {
+				header.setAttribute('breakpoint', e.target.value);
+			});
+
+			function bindSlider(id, attribute, format) {
+				const input = document.getElementById(id);
+				const output = document.getElementById(`${id}-value`);
+				input.addEventListener('input', () => {
+					header.setAttribute(attribute, input.value);
+					output.textContent = format(input.value);
+				});
+			}
+
+			bindSlider('reveal', 'reveal-threshold', (v) => `${v}`);
+			bindSlider('threshold', 'settle-threshold', (v) => Number(v).toFixed(2));
+			bindSlider('duration', 'settle-duration', (v) => `${v}ms`);
+			bindSlider('overshoot', 'settle-overshoot', (v) => Number(v).toFixed(3));
+
+			// ---- buttons ----
+
+			document.addEventListener('click', (e) => {
+				const target = e.target;
+
+				if (target.closest('[data-action-menu]') || target.closest('[data-action-open-dialog]')) {
+					dialog.showModal();
+					return;
+				}
+				if (target.closest('[data-action-close-dialog]')) {
+					dialog.close();
+					return;
+				}
+				if (target.closest('[data-action-toggle-announcement]')) {
+					announcement.hidden = !announcement.hidden;
+					return;
+				}
+				// live tag edits: the component re-queries the boundary on a mutation,
+				// exactly as it has to when the theme editor re-renders a section
+				if (target.closest('[data-action-cycle-reveal]')) {
+					const cycle = ['mobile', 'desktop', 'both', null];
+					const current = announcement.getAttribute('data-sticky-reveal');
+					const next = cycle[(cycle.indexOf(current) + 1) % cycle.length];
+					if (next === null) announcement.removeAttribute('data-sticky-reveal');
+					else announcement.setAttribute('data-sticky-reveal', next);
+					document.getElementById('reveal-tag-value').textContent = next ?? 'untagged';
+					return;
+				}
+				if (target.closest('[data-action-toggle-hover-lock]')) {
+					header.toggleAttribute('hover-lock');
+					return;
+				}
+				if (target.closest('[data-action-toggle-disabled]')) {
+					header.toggleAttribute('disabled');
+					return;
+				}
+				if (target.closest('[data-action-toggle-panel]')) {
+					lockPanel.toggleAttribute('data-open');
+					return;
+				}
+				if (target.closest('[data-action-toggle-lock]')) {
+					if (header.hasAttribute('locked')) header.unlock();
+					else header.lock();
+					return;
+				}
+				if (target.closest('[data-action-show]')) {
+					header.show();
+					return;
+				}
+				if (target.closest('[data-action-hide]')) {
+					header.hide();
+					return;
+				}
+				if (target.closest('[data-action-collapse]')) {
+					const controls = document.getElementById('controls');
+					const collapsed = controls.toggleAttribute('collapsed');
+					target.textContent = collapsed ? 'controls' : 'hide';
+					return;
+				}
+
+				const scroller = target.closest('[data-action-scroll]');
+				if (scroller) {
+					const raw = scroller.getAttribute('data-action-scroll');
+					const top = raw === 'end' ? document.documentElement.scrollHeight : Number(raw);
+					window.scrollTo({
+						top,
+						behavior: scroller.hasAttribute('data-smooth') ? 'smooth' : 'instant',
+					});
+				}
+			});
+
+			// ---- live readout ----
+
+			const outOffset = document.getElementById('out-offset');
+			const outProgress = document.getElementById('out-progress');
+			const outMotion = document.getElementById('out-motion');
+			const outState = document.getElementById('out-state');
+			const outGroup = document.getElementById('out-group');
+			const outReveal = document.getElementById('out-reveal');
+			const meterFill = document.getElementById('meter-fill');
+			const meterReveal = document.getElementById('meter-reveal');
+			const meterThreshold = document.getElementById('meter-threshold');
+
+			function readout() {
+				const progress = header.progress;
+				const groupHeight = header.groupHeight;
+				outOffset.textContent = `${header.offset.toFixed(1)}px`;
+				outProgress.textContent = progress.toFixed(3);
+				outState.textContent = body.getAttribute('data-state') || '—';
+				outGroup.textContent = `${groupHeight}px`;
+				outReveal.textContent = `${header.revealOffset}px`;
+				meterFill.style.width = `${progress * 100}%`;
+
+				// the reveal stop, and the settle threshold — which brackets the two
+				// stops on either side of it, not the full travel
+				const revealFraction = groupHeight > 0 ? -header.revealOffset / groupHeight : 0;
+				const settleThreshold = Number(document.getElementById('threshold').value);
+				meterReveal.style.left = `${revealFraction * 100}%`;
+				meterThreshold.style.left = `${(revealFraction + (1 - revealFraction) * settleThreshold) * 100}%`;
+
+				let motion = 'idle';
+				if (body.hasAttribute('data-header-tracking')) motion = 'moving';
+				else if (body.hasAttribute('data-header-hidden')) motion = 'hidden';
+				else if (body.hasAttribute('data-header-revealed')) motion = 'revealed';
+				if (body.hasAttribute('data-header-locked')) motion += ' · locked';
+				outMotion.textContent = motion;
+
+				requestAnimationFrame(readout);
+			}
+			requestAnimationFrame(readout);
+		</script>
+	</body>
+</html>

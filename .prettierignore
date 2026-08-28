@@ -1,0 +1,6 @@
+# generated bundles — rewriting them desyncs their source maps
+dist/
+demo/dist/
+
+# prose keeps its hand-written formatting
+*.md

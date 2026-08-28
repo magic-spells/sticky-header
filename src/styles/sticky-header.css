@@ -1,0 +1,70 @@
+/*
+  @magic-spells/sticky-header
+
+  There are deliberately NO transitions in this file. The settle is a JS rAF
+  tween of the same custom property that tracking writes, so there is never a
+  transition to suppress mid-scroll and cancelling a settle is exact.
+
+  Everything here is a pure reader of vars the JS maintains on <body>:
+    --header-group-offset   per frame, 0 → −(group height)
+    --header-group-height   measured, maintained at every breakpoint
+    --header-height
+    --announcement-bar-height
+    --header-reveal-offset  the middle resting stop, 0 with nothing tagged
+*/
+
+:root {
+	--header-group-offset: 0px;
+	--header-reveal-offset: 0px;
+	--sticky-header-z-index: 100;
+	--sticky-content-z-index: 10;
+}
+
+sticky-header {
+	display: block;
+	position: sticky;
+	top: 0;
+	z-index: var(--sticky-header-z-index);
+	transform: translateY(var(--header-group-offset, 0px));
+	will-change: transform;
+}
+
+/*
+  Bounce cap. The show settle overshoots past rest, which briefly pushes the
+  group DOWN and would expose page content in the gap above it. The cap extends
+  <sticky-header>'s own background upward to cover that dip.
+
+  It paints that background via `background: inherit`, so a background living on
+  an inner element instead has to be restated on the pseudo-element (see the
+  README).
+*/
+sticky-header::before {
+	content: '';
+	position: absolute;
+	bottom: 100%;
+	left: 0;
+	right: 0;
+	height: 2rem;
+	background: inherit;
+	pointer-events: none;
+}
+
+/*
+  Riders position themselves with a MOVING sticky inset — the header's offset
+  is part of the inset itself, so the pin position is continuous at every
+  scroll position and a rider that first pins while the header is already
+  hidden lands correctly with no jump. Authors set the resting inset with
+  `--sticky-content-top` (or the `top` attribute); JS only adds `[stuck]`.
+*/
+sticky-content {
+	display: block;
+	position: sticky;
+	top: calc(
+		var(--sticky-content-top, var(--header-group-height, 0px)) + var(--header-group-offset, 0px)
+	);
+	z-index: var(--sticky-content-z-index);
+}
+
+sticky-content[disabled] {
+	top: var(--sticky-content-top, var(--header-group-height, 0px));
+}
