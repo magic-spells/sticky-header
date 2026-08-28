@@ -426,7 +426,8 @@ var ScrollEngine = {
 	*
 	* Read per frame rather than cached: the rule can be breakpoint-dependent,
 	* and a cache would have to be refreshed from wherever CSS might change.
-	* This runs in the frame's read phase, so the read is free of layout thrash.
+	* It sits beside a rect read either way — in the frame's read phase, or off
+	* it via onScrollIdle → _trackable() — so it adds no thrash of its own.
 	* @returns {boolean} True while the group is pinned
 	*/
 	_pinned() {
@@ -1028,12 +1029,13 @@ var StickyHeader = class extends HTMLElement {
 		if (!targets.length) return 0;
 		const isDesktop = _.#mediaQuery ? _.#mediaQuery.matches : true;
 		const hostTop = _.getBoundingClientRect().top;
+		const carried = getComputedStyle(_).transform === "none" ? ScrollEngine.offset : 0;
 		let boundary = null;
 		for (const element of targets) {
 			if (!_.#revealApplies(element.getAttribute(REVEAL_ATTRIBUTE), isDesktop)) continue;
 			const rect = element.getBoundingClientRect();
 			if (!rect.width && !rect.height) continue;
-			const top = rect.top - hostTop;
+			const top = rect.top - hostTop - carried;
 			if (boundary === null || top < boundary) boundary = top;
 		}
 		if (boundary === null) return groupHeight;
@@ -1166,11 +1168,9 @@ var StickyHeader = class extends HTMLElement {
 	}
 	/** Force-show until unlock(). */
 	lock() {
-		if (!this.#initialized) return;
 		this.setAttribute("locked", "");
 	}
 	unlock() {
-		if (!this.#initialized) return;
 		this.removeAttribute("locked");
 	}
 	/** Re-measures geometry and rebases scroll tracking. */

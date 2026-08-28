@@ -463,7 +463,9 @@ class StickyHeader extends HTMLElement {
 	  the tag lands on the section's inner root and offsetTop would be relative
 	  to whatever offset parent that wrapper happens to create. And
 	  translate-invariant: both rects carry the group's transform equally, so
-	  the difference is the same at every point of the travel.
+	  the difference is the same at every point of the travel — unless the host
+	  is not the translating element, which is the one case #measureRevealHeight
+	  corrects for.
 
 	  Reads and the var write are split so the engine can take the reads in its
 	  read phase and the write in its write phase.
@@ -519,6 +521,15 @@ class StickyHeader extends HTMLElement {
 
 		const isDesktop = _.#mediaQuery ? _.#mediaQuery.matches : true;
 		const hostTop = _.getBoundingClientRect().top;
+		// The rect difference is translate-invariant only while BOTH rects carry
+		// the group transform — which is the package CSS, where the host is the
+		// translating element. Under the documented `position: fixed` workaround
+		// the host is `transform: none` and the translate sits on an inner
+		// element, so the boundary rect carries the offset and the host rect does
+		// not: the difference measures `true + offset` and the offset has to come
+		// back out. Measured hidden at −129 that would read 64 − 129 = −65, clamp
+		// to 0, and publish "nothing tagged" until the next measure at rest.
+		const carried = getComputedStyle(_).transform === 'none' ? ScrollEngine.offset : 0;
 		let boundary = null;
 
 		for (const element of targets) {
@@ -527,7 +538,7 @@ class StickyHeader extends HTMLElement {
 			// a bar removed with `hidden` (or any display:none) has no box, so it
 			// can't be the boundary — the next active tag down takes over
 			if (!rect.width && !rect.height) continue;
-			const top = rect.top - hostTop;
+			const top = rect.top - hostTop - carried;
 			if (boundary === null || top < boundary) boundary = top;
 		}
 
@@ -690,11 +701,12 @@ class StickyHeader extends HTMLElement {
 	}
 
 	/*
-	  Every method below is inert on a host that never initialized — which is
-	  exactly the rejected duplicate, since only the accepted host initializes.
-	  Without the guard a duplicate reaches the singleton with its own zero
-	  geometry: hide() would request a settle to 0 and SHOW the live header, and
-	  refresh() would hand `new ResizeObserver` a handler that was never bound.
+	  Everything below that reaches the engine is inert on a host that never
+	  initialized — which is exactly the rejected duplicate, since only the
+	  accepted host initializes. Without the guard a duplicate reaches the
+	  singleton with its own zero geometry: hide() would request a settle to 0
+	  and SHOW the live header, and refresh() would hand `new ResizeObserver` a
+	  handler that was never bound.
 	*/
 
 	/**
@@ -719,14 +731,22 @@ class StickyHeader extends HTMLElement {
 		ScrollEngine.tick();
 	}
 
+	/*
+	  lock()/unlock() are deliberately NOT guarded: they only write the `locked`
+	  attribute, which #init() honours whenever it runs. A guard would drop a
+	  lock() called before init — the package as a blocking script in <head>
+	  defers init to DOMContentLoaded, so author code in a deferred or module
+	  script runs first — and that is exactly the lock()-before-jump pattern the
+	  README recommends. On a rejected duplicate the attribute is inert: nothing
+	  reads it.
+	*/
+
 	/** Force-show until unlock(). */
 	lock() {
-		if (!this.#initialized) return;
 		this.setAttribute('locked', '');
 	}
 
 	unlock() {
-		if (!this.#initialized) return;
 		this.removeAttribute('locked');
 	}
 

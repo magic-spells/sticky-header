@@ -121,7 +121,7 @@
 			this.revealAnchor = 0;
 			this.start();
 			this.rebase();
-			this.rebaseOnNextScroll = true;
+			this.rebaseOnNextScroll = document.readyState !== "complete";
 			this.tick();
 			return true;
 		},
@@ -417,13 +417,29 @@
 		/**
 		* Whether the group has reached its pinned position. Tested against the
 		* UNtranslated top — `rect.top` already carries the transform, so the offset
-		* has to be taken back out of it or the check oscillates.
+		* has to be taken back out of it or the check oscillates on the show
+		* overshoot, where `offset > 0` drags the rect below `stickyTop`.
+		*
+		* The host may or may not BE the translating element, though: the documented
+		* `position: fixed` workaround sets `transform: none` here and moves the
+		* translate to an inner element, and then the rect carries no offset to
+		* undo — subtracting one anyway makes the test false the whole time the
+		* header is hidden, which force-shows it every frame. The package rule
+		* always resolves to a matrix (even at offset 0, `translateY(0px)` computes
+		* to one), so a computed `none` identifies that workaround exactly.
+		*
+		* Read per frame rather than cached: the rule can be breakpoint-dependent,
+		* and a cache would have to be refreshed from wherever CSS might change.
+		* It sits beside a rect read either way — in the frame's read phase, or off
+		* it via onScrollIdle → _trackable() — so it adds no thrash of its own.
 		* @returns {boolean} True while the group is pinned
 		*/
 		_pinned() {
 			const header = this.header;
 			if (!header) return false;
-			return header.getBoundingClientRect().top - this.offset <= header._geometry.stickyTop + .5;
+			const rect = header.getBoundingClientRect();
+			const applied = getComputedStyle(header).transform === "none" ? 0 : this.offset;
+			return rect.top - applied <= header._geometry.stickyTop + .5;
 		},
 		/**
 		* Whether ANY mode could move the group right now. Purely config and
@@ -1005,6 +1021,10 @@
 			ScrollEngine.onStopsChanged();
 		}
 		/**
+		* UNROUNDED on purpose — _readReveal compares this against the previous raw
+		* measurement, so rounding here would make every distinct value differ by a
+		* full pixel and the 1px epsilon could never absorb anything. The round
+		* happens once, at the publication point.
 		* @returns {number} Distance from the group top to the reveal boundary, in px
 		*/
 		#measureRevealHeight(groupHeight) {
@@ -1013,16 +1033,17 @@
 			if (!targets.length) return 0;
 			const isDesktop = _.#mediaQuery ? _.#mediaQuery.matches : true;
 			const hostTop = _.getBoundingClientRect().top;
+			const carried = getComputedStyle(_).transform === "none" ? ScrollEngine.offset : 0;
 			let boundary = null;
 			for (const element of targets) {
 				if (!_.#revealApplies(element.getAttribute(REVEAL_ATTRIBUTE), isDesktop)) continue;
 				const rect = element.getBoundingClientRect();
 				if (!rect.width && !rect.height) continue;
-				const top = rect.top - hostTop;
+				const top = rect.top - hostTop - carried;
 				if (boundary === null || top < boundary) boundary = top;
 			}
 			if (boundary === null) return groupHeight;
-			return clamp(Math.round(boundary), 0, groupHeight);
+			return clamp(boundary, 0, groupHeight);
 		}
 		/**
 		* @param {string|null} value - Raw `data-sticky-reveal` value
@@ -1048,6 +1069,9 @@
 		_measure() {
 			const _ = this;
 			if (!_.#initialized) return;
+			const previousAnnouncement = _.#announcementElement;
+			_.queryDOM();
+			if (_.#announcementElement !== previousAnnouncement) _.#observeTargets();
 			const announcementHeight = _.#announcementElement ? _.#announcementElement.offsetHeight : 0;
 			const headerHeight = _.offsetHeight - announcementHeight;
 			const groupHeight = announcementHeight + headerHeight;
@@ -1122,8 +1146,13 @@
 		get groupHeight() {
 			return this.#geometry.groupHeight;
 		}
-		/** Settles the header fully visible. */
+		/**
+		* Plays the show settle. Normal resting rules resume the moment it lands, so
+		* mid-page on a tagged stack the next idle tucks to the reveal stop — use
+		* lock() to hold the group fully visible.
+		*/
 		show() {
+			if (!this.#initialized) return;
 			ScrollEngine.requestSettle(0, {
 				reason: "show",
 				forced: true
@@ -1132,6 +1161,7 @@
 		}
 		/** Settles the header fully hidden. A no-op while locked or inactive. */
 		hide() {
+			if (!this.#initialized) return;
 			this.#lockDirty = true;
 			if (this._isLocked() || !this._isActive()) return;
 			ScrollEngine.requestSettle(-this.#geometry.groupHeight, {
@@ -1149,6 +1179,7 @@
 		}
 		/** Re-measures geometry and rebases scroll tracking. */
 		refresh() {
+			if (!this.#initialized) return;
 			this.queryDOM();
 			this.#observeTargets();
 			this.#lockDirty = true;
@@ -1166,6 +1197,8 @@
 	var StickyContent = class extends HTMLElement {
 		#baseTop = null;
 		#initialized = false;
+		#ownsTop = false;
+		#authorTop = null;
 		handlers = {};
 		static get observedAttributes() {
 			return ["top", "disabled"];
@@ -1193,7 +1226,7 @@
 			ScrollEngine.unregisterRider(_);
 			_.#baseTop = null;
 			_.removeAttribute("stuck");
-			_.style.removeProperty("--sticky-content-top");
+			_.#releaseTop();
 		}
 		attributeChangedCallback(name, previousValue, currentValue) {
 			if (!this.#initialized || previousValue === currentValue) return;
@@ -1208,11 +1241,28 @@
 			_.#applyTop();
 			ScrollEngine.registerRider(_);
 		}
-		/** The `top` attribute is sugar for setting `--sticky-content-top` inline. */
 		#applyTop() {
-			const value = this.getAttribute("top");
-			if (value === null || value === "") this.style.removeProperty("--sticky-content-top");
-			else this.style.setProperty("--sticky-content-top", value);
+			const _ = this;
+			const value = _.getAttribute("top");
+			if (value === null || value === "") {
+				_.#releaseTop();
+				return;
+			}
+			if (!_.#ownsTop) {
+				_.#authorTop = _.style.getPropertyValue("--sticky-content-top");
+				_.#ownsTop = true;
+			}
+			_.style.setProperty("--sticky-content-top", value);
+		}
+		/** Gives the inline declaration back, if it was ours to give. */
+		#releaseTop() {
+			const _ = this;
+			if (!_.#ownsTop) return;
+			_.#ownsTop = false;
+			const author = _.#authorTop;
+			_.#authorTop = null;
+			if (author) _.style.setProperty("--sticky-content-top", author);
+			else _.style.removeProperty("--sticky-content-top");
 		}
 		/**
 		* The resting sticky inset in px, with the header offset taken back out.

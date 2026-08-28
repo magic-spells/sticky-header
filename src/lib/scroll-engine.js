@@ -477,7 +477,8 @@ const ScrollEngine = {
 	 *
 	 * Read per frame rather than cached: the rule can be breakpoint-dependent,
 	 * and a cache would have to be refreshed from wherever CSS might change.
-	 * This runs in the frame's read phase, so the read is free of layout thrash.
+	 * It sits beside a rect read either way — in the frame's read phase, or off
+	 * it via onScrollIdle → _trackable() — so it adds no thrash of its own.
 	 * @returns {boolean} True while the group is pinned
 	 */
 	_pinned() {

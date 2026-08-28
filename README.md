@@ -135,7 +135,7 @@ By default it rests at `--header-group-height` (directly under the header). Over
 <sticky-content top="calc(var(--header-group-height, 0px) + 1rem)">…</sticky-content>
 ```
 
-Or set `--sticky-content-top` yourself, inline or from a stylesheet — the attribute is only sugar for the inline form, and it leaves a value you wrote alone:
+Or set `--sticky-content-top` yourself, inline or from a stylesheet — the attribute is only sugar for the inline form, and it owns nothing it did not write. Use one or the other: with both, the attribute wins while it is there and puts your inline value back if it is removed.
 
 ```html
 <sticky-content style="--sticky-content-top: 6rem">…</sticky-content>
@@ -327,7 +327,7 @@ sticky-header > .header-inner {
 }
 ```
 
-The component detects this: it checks whether the host resolves to `transform: none` and stops assuming the host rect carries the offset, so its pinned test keeps working either way. Nothing else to configure.
+The component detects this: it checks whether the host resolves to `transform: none` and stops assuming the host rect carries the offset, so both its pinned test and its reveal-boundary measurement keep working either way. Nothing else to configure.
 
 **`overflow: hidden` on an ancestor breaks `position: sticky`.** This is a CSS rule, not something the component can work around. If the header never sticks, walk up the ancestors looking for `overflow: hidden` (or `clip`/`auto`) and remove it.
 
