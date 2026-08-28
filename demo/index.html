@@ -239,6 +239,7 @@
 			}
 
 			.hero {
+				position: relative;
 				display: flex;
 				flex-direction: column;
 				align-items: center;
@@ -248,7 +249,47 @@
 				padding: 4rem 0;
 			}
 
+			/* Glow. Absolutely positioned inside .hero only — no overflow, filter or
+			   transform on any ancestor of <sticky-header> / <sticky-content>. It sits
+			   under the sticky z-indexes (header 100, riders 10), so it never covers
+			   the group; the hero's own content is lifted with position: relative. */
+			.hero::before {
+				content: '';
+				position: absolute;
+				top: -20%;
+				left: 50%;
+				/* never wider than the viewport — anything past 100vw opens
+				   horizontal page overflow on mobile */
+				width: min(1000px, 100vw);
+				height: 900px;
+				transform: translateX(-50%);
+				background: radial-gradient(ellipse, var(--accent-glow), transparent 68%);
+				pointer-events: none;
+				z-index: 0;
+			}
+
+			.hero-badge {
+				position: relative;
+				max-width: 100%;
+				margin-bottom: 2.25rem;
+				padding: 0.45em 1.25em;
+				color: var(--accent);
+				border: 1px solid var(--border-accent);
+				border-radius: 100px;
+				font-size: 0.95rem;
+				font-weight: 400;
+				letter-spacing: 0.1em;
+				text-decoration: none;
+				text-transform: uppercase;
+				transition: border-color 0.3s ease;
+			}
+
+			.hero-badge:hover {
+				border-color: var(--accent-mid);
+			}
+
 			.hero h1 {
+				position: relative;
 				font-family: var(--font-display);
 				font-weight: 300;
 				font-size: clamp(2.5rem, 7vw, 5rem);
@@ -264,6 +305,7 @@
 			}
 
 			.hero p {
+				position: relative;
 				max-width: 34rem;
 				font-size: 1.05rem;
 				line-height: 1.7;
@@ -271,6 +313,7 @@
 			}
 
 			.hero code {
+				position: relative;
 				font-family: var(--font-mono);
 				font-size: 0.85rem;
 				color: var(--accent);
@@ -734,6 +777,11 @@
 					width: auto;
 					left: 1rem;
 				}
+
+				.hero-badge {
+					font-size: 0.8rem;
+					transition: none;
+				}
 			}
 		</style>
 	</head>
@@ -796,6 +844,9 @@
 
 		<main>
 			<section class="hero">
+				<a class="hero-badge" href="https://github.com/magic-spells/sticky-header"
+					>@magic-spells/sticky-header</a
+				>
 				<h1>
 					<split-text split="chars" trigger="load" stagger="26" duration="820">
 						Follows your <em>scroll</em>
