@@ -1,6 +1,6 @@
 {
 	"name": "@magic-spells/sticky-header",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Scroll-following sticky header web component — the header tracks the scroll 1:1 and settles to shown or hidden on idle, with sticky-content riders, breakpoint gating, and lock support, no dependencies",
 	"author": "Cory Schulz",
 	"license": "MIT",
