@@ -206,7 +206,8 @@
 				<span>y <b id="out-y">0.0</b></span>
 				<span>Δ <b id="out-delta">0.00</b></span>
 				<span
-					>max <b id="out-max">0.00</b> <button type="button" id="reset-max">reset</button></span
+					>max <b id="out-max">0.00</b> <button type="button" id="reset-max">reset</button>
+					<button type="button" id="hud-toggle">hud: live</button></span
 				>
 			</div>
 			<div class="row">
@@ -300,6 +301,14 @@
 			let maxGap = 0;
 			let drops = 0;
 
+			// quiet mode: keep counting, stop the per-frame DOM writes — so the HUD
+			// itself can be ruled out as the source of measured frame drops
+			let hud = true;
+			el('hud-toggle').addEventListener('click', (e) => {
+				hud = !hud;
+				e.target.textContent = hud ? 'hud: live' : 'hud: quiet';
+			});
+
 			el('reset-max').addEventListener('click', () => {
 				max = 0;
 				maxYFrac = 0;
@@ -317,17 +326,19 @@
 				prev = offset;
 				if (Math.abs(delta) > max) max = Math.abs(delta);
 
-				outOffset.textContent = offset.toFixed(2);
-				outY.textContent = scrollY.toFixed(1);
-				outDelta.textContent = delta.toFixed(2);
-				outMax.textContent = max.toFixed(2);
-
 				const yf = frac(scrollY);
 				if (yf > maxYFrac) maxYFrac = yf;
 				const rf = frac(probe.getBoundingClientRect().top);
 				if (rf > maxRectFrac) maxRectFrac = rf;
-				outYfrac.textContent = maxYFrac.toFixed(3);
-				outRfrac.textContent = maxRectFrac.toFixed(3);
+
+				if (hud) {
+					outOffset.textContent = offset.toFixed(2);
+					outY.textContent = scrollY.toFixed(1);
+					outDelta.textContent = delta.toFixed(2);
+					outMax.textContent = max.toFixed(2);
+					outYfrac.textContent = maxYFrac.toFixed(3);
+					outRfrac.textContent = maxRectFrac.toFixed(3);
+				}
 
 				frames++;
 				if (scrollY !== lastSeenY) {
@@ -354,18 +365,20 @@
 					windowStart = now;
 				}
 
-				outState.textContent = body.getAttribute('data-state') || '—';
-				outMotion.textContent = body.hasAttribute('data-header-tracking')
-					? body.hasAttribute('data-header-locked')
-						? 'moving·lock'
-						: 'moving'
-					: body.hasAttribute('data-header-locked')
-						? 'lock'
-						: 'idle';
-				outHidden.textContent = body.hasAttribute('data-header-hidden') ? 'yes' : 'no';
-				outEvent.textContent = lastEvent
-					? `${lastEvent.name} ${Math.round(performance.now() - lastEvent.at)}ms`
-					: '—';
+				if (hud) {
+					outState.textContent = body.getAttribute('data-state') || '—';
+					outMotion.textContent = body.hasAttribute('data-header-tracking')
+						? body.hasAttribute('data-header-locked')
+							? 'moving·lock'
+							: 'moving'
+						: body.hasAttribute('data-header-locked')
+							? 'lock'
+							: 'idle';
+					outHidden.textContent = body.hasAttribute('data-header-hidden') ? 'yes' : 'no';
+					outEvent.textContent = lastEvent
+						? `${lastEvent.name} ${Math.round(performance.now() - lastEvent.at)}ms`
+						: '—';
+				}
 
 				requestAnimationFrame(frame);
 			}
