@@ -214,6 +214,8 @@
 				<span>rfrac <b id="out-rfrac">0.000</b></span>
 				<span>raf <b id="out-rafhz">—</b>Hz</span>
 				<span>yupd <b id="out-yhz">—</b>Hz</span>
+				<span>gap <b id="out-gap">—</b>ms</span>
+				<span>drops <b id="out-drops">—</b></span>
 			</div>
 			<div class="row">
 				<span>state <b id="out-state">—</b></span>
@@ -290,6 +292,14 @@
 			let lastSeenY = scrollY;
 			let windowStart = performance.now();
 
+			// inter-frame timing: worst gap and count of late frames (>25ms ≈ a
+			// missed 60Hz deadline) per window — the variance an average hides
+			const outGap = el('out-gap');
+			const outDrops = el('out-drops');
+			let lastFrameAt = 0;
+			let maxGap = 0;
+			let drops = 0;
+
 			el('reset-max').addEventListener('click', () => {
 				max = 0;
 				maxYFrac = 0;
@@ -325,12 +335,22 @@
 					lastSeenY = scrollY;
 				}
 				const now = performance.now();
+				if (lastFrameAt > 0) {
+					const gap = now - lastFrameAt;
+					if (gap > maxGap) maxGap = gap;
+					if (gap > 25) drops++;
+				}
+				lastFrameAt = now;
 				if (now - windowStart >= 1000) {
 					const secs = (now - windowStart) / 1000;
 					outRafHz.textContent = String(Math.round(frames / secs));
 					outYHz.textContent = String(Math.round(yChanges / secs));
+					outGap.textContent = maxGap.toFixed(1);
+					outDrops.textContent = String(drops);
 					frames = 0;
 					yChanges = 0;
+					maxGap = 0;
+					drops = 0;
 					windowStart = now;
 				}
 
@@ -357,6 +377,7 @@
 				} else if (!running) {
 					running = true;
 					prev = parseFloat(body.style.getPropertyValue('--header-group-offset')) || 0;
+					lastFrameAt = 0;
 					requestAnimationFrame(frame);
 				}
 			});
