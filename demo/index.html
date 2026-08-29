@@ -1435,6 +1435,23 @@
 					<input type="range" id="overshoot" min="0" max="0.2" step="0.005" value="0.05" />
 				</div>
 
+				<div class="field">
+					<span class="group-label">tracking-smoothing</span>
+					<div class="radios" id="smoothing-modes">
+						<label><input type="radio" name="smoothing" value="0" checked />off</label>
+						<label><input type="radio" name="smoothing" value="20" />20ms</label>
+						<label><input type="radio" name="smoothing" value="35" />35ms</label>
+						<label><input type="radio" name="smoothing" value="50" />50ms</label>
+					</div>
+				</div>
+
+				<div class="field">
+					<span class="group-label">scroll handler</span>
+					<div class="radios">
+						<label> <input type="checkbox" id="quiet-height" checked />quietOnHeightResize </label>
+					</div>
+				</div>
+
 				<div class="divider"></div>
 
 				<div class="buttons">
@@ -1492,6 +1509,10 @@
 
 		<script type="module" src="dist/sticky-header.esm.js"></script>
 		<script type="module">
+			// same URL as the tag above, so this is the same module instance — the
+			// scroll handler is a singleton and the page has to reach THAT one
+			import { ScrollHandler } from './dist/sticky-header.esm.js';
+
 			const header = document.getElementById('header');
 			const body = document.body;
 			const dialog = document.getElementById('menu-dialog');
@@ -1520,6 +1541,17 @@
 			bindSlider('threshold', 'settle-threshold', (v) => Number(v).toFixed(2));
 			bindSlider('duration', 'settle-duration', (v) => `${v}ms`);
 			bindSlider('overshoot', 'settle-overshoot', (v) => Number(v).toFixed(3));
+
+			// the two levers being A/B tested on a real phone
+			document.getElementById('smoothing-modes').addEventListener('change', (e) => {
+				const ms = Number(e.target.value);
+				if (ms > 0) header.setAttribute('tracking-smoothing', String(ms));
+				else header.removeAttribute('tracking-smoothing');
+			});
+
+			document.getElementById('quiet-height').addEventListener('change', (e) => {
+				ScrollHandler.quietOnHeightResize = e.target.checked;
+			});
 
 			// ---- buttons ----
 
