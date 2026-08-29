@@ -760,7 +760,30 @@ const ScrollEngine = {
 			  raw value outright, which is the whole opt-out.
 			*/
 			const tau = _.motion === 'tracking' ? header._config.trackingSmoothing : 0;
-			_.published = expApproach(_.published, _.offset, dt, tau);
+			let publish = expApproach(_.published, _.offset, dt, tau);
+
+			/*
+			  The safety clamps above constrain the RAW offset, and with smoothing on
+			  the published value is a DIFFERENT number that lags behind it — so it has
+			  to obey them on its own account, or the guarantees are only true of a
+			  number nothing can see. The case that bites: scrolling up fast from
+			  hidden near the page top, the raw offset is floored at −y immediately
+			  while the published one is still easing up from −groupHeight, and for
+			  those frames the group is translated out of a flow slot that is still on
+			  screen — a gap above the page content, which is exactly what the floor
+			  exists to prevent.
+
+			  Gated on `tau > 0`, which is the tracking path and nothing else. With
+			  smoothing off, and on every settle frame, expApproach returns the raw
+			  offset outright and clamping it here would destroy the show overshoot,
+			  which deliberately goes past 0.
+			*/
+			if (tau > 0) {
+				publish = clamp(publish, -groupHeight, 0);
+				if (publish < -y) publish = -y;
+			}
+
+			_.published = publish;
 		}
 
 		// ---- writes ----
@@ -790,12 +813,24 @@ const ScrollEngine = {
 		if (!this.header) return;
 		// the PUBLISHED value, which is the raw offset unless smoothing is on
 		const offset = this.published;
-		const settled = this.motion === 'idle';
-		// the final easing steps fall under the write epsilon, so a settle that
-		// just finished force-publishes once or the resting value stays short
+		/*
+		  The epsilon is a SETTLE guard, not a general one.
+
+		  A tween's last easing steps land inside it, and writing a var per frame
+		  for a move nothing can see is waste; suppressing them lets the value
+		  accumulate and write once it is worth writing. A settle that just
+		  FINISHED is already idle by here, so it falls outside the gate and
+		  force-publishes — the resting stop is landed on exactly.
+
+		  While TRACKING it must not apply. The offset follows the scroll 1:1, and
+		  a gate there swallows the first small write of a real movement and turns
+		  slow continuous motion into accumulated micro-steps — the smoothing tail
+		  included, where the published value is converging by design. Every
+		  numerically changed value is written.
+		*/
 		if (
 			this.lastWritten !== null &&
-			!settled &&
+			this.motion === 'settling' &&
 			Math.abs(offset - this.lastWritten) <= WRITE_EPSILON
 		) {
 			return;

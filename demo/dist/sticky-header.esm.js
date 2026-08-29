@@ -1022,7 +1022,12 @@ var ScrollEngine = {
 			if (_.offset < -y) _.offset = -y;
 			if (!glide) _.revealAnchor = y + _.offset;
 			const tau = _.motion === "tracking" ? header._config.trackingSmoothing : 0;
-			_.published = expApproach(_.published, _.offset, dt, tau);
+			let publish = expApproach(_.published, _.offset, dt, tau);
+			if (tau > 0) {
+				publish = clamp(publish, -groupHeight, 0);
+				if (publish < -y) publish = -y;
+			}
+			_.published = publish;
 		}
 		header?._writeReveal();
 		_._writeOffset();
@@ -1034,8 +1039,7 @@ var ScrollEngine = {
 	_writeOffset() {
 		if (!this.header) return;
 		const offset = this.published;
-		const settled = this.motion === "idle";
-		if (this.lastWritten !== null && !settled && Math.abs(offset - this.lastWritten) <= .05) return;
+		if (this.lastWritten !== null && this.motion === "settling" && Math.abs(offset - this.lastWritten) <= .05) return;
 		if (this.lastWritten === offset) return;
 		this.lastWritten = offset;
 		document.body.style.setProperty("--header-group-offset", `${offset}px`);
