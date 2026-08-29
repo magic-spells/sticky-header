@@ -20,6 +20,20 @@ export default [
 		...pluginJs.configs.recommended,
 	},
 	{
+		// Test suite — jsdom, so browser globals, plus node for the vitest runner
+		files: ['test/**/*.js', 'vitest.config.js'],
+		languageOptions: {
+			globals: {
+				...globals.browser,
+				...globals.node,
+				...globals.es2024,
+			},
+			ecmaVersion: 2024,
+			sourceType: 'module',
+		},
+		...pluginJs.configs.recommended,
+	},
+	{
 		// Build scripts
 		files: ['scripts/**/*.{js,mjs}'],
 		languageOptions: {
