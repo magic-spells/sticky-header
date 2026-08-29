@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<title>sticky-header — scroll test</title>
+
+		<link rel="stylesheet" href="dist/sticky-header.min.css" />
+
+		<style>
+			:root {
+				--bg: #07060b;
+				--card: #15141c;
+				--border: #2a2636;
+				--accent: #818cf8;
+				--text: #f2efe6;
+				--dim: #b6b0c4;
+				--mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+			}
+
+			* {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+			}
+
+			html {
+				background: var(--bg);
+			}
+
+			body {
+				font-family: system-ui, sans-serif;
+				color: var(--text);
+				background: var(--bg);
+				/* clear the fixed readout */
+				padding-bottom: calc(7rem + env(safe-area-inset-bottom));
+			}
+
+			/* ---- header group ---- */
+
+			sticky-header {
+				/* the bounce cap inherits this, so it belongs on the host */
+				background: var(--card);
+				border-bottom: 1px solid var(--border);
+			}
+
+			.announcement {
+				padding: 0.55rem 1rem;
+				background: #4338ca;
+				color: #eef2ff;
+				font-size: 0.72rem;
+				letter-spacing: 0.12em;
+				text-transform: uppercase;
+				text-align: center;
+			}
+
+			.site-header {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 1rem;
+				padding: 0.9rem 1rem;
+			}
+
+			.brand {
+				font-size: 1rem;
+				font-weight: 500;
+			}
+
+			.site-nav {
+				display: flex;
+				gap: 1rem;
+				font-size: 0.8rem;
+			}
+
+			.site-nav a {
+				color: var(--dim);
+				text-decoration: none;
+			}
+
+			/* ---- runway ---- */
+
+			.block {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+				gap: 0.75rem;
+				min-height: 90vh;
+				align-content: center;
+				padding: 2rem 1rem;
+				border-top: 1px solid var(--border);
+			}
+
+			.tile {
+				min-height: 9rem;
+				background: var(--card);
+				border: 1px solid var(--border);
+				border-radius: 12px;
+			}
+
+			/* ---- readout ---- */
+
+			.readout {
+				position: fixed;
+				left: 0;
+				right: 0;
+				bottom: 0;
+				z-index: 900;
+				padding: 0.6rem 0.75rem calc(0.6rem + env(safe-area-inset-bottom));
+				background: rgba(7, 6, 11, 0.94);
+				border-top: 1px solid var(--border);
+				font-family: var(--mono);
+				font-size: 0.72rem;
+				line-height: 1.5;
+				color: var(--dim);
+			}
+
+			.readout b {
+				color: var(--text);
+				font-weight: 400;
+			}
+
+			.offset {
+				display: block;
+				font-size: 2rem;
+				line-height: 1.1;
+				color: var(--accent);
+				font-variant-numeric: tabular-nums;
+			}
+
+			.row {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0 1rem;
+			}
+
+			.readout button {
+				font-family: var(--mono);
+				font-size: 0.65rem;
+				color: var(--dim);
+				background: var(--card);
+				border: 1px solid var(--border);
+				border-radius: 5px;
+				padding: 0.1em 0.5em;
+				cursor: pointer;
+			}
+		</style>
+	</head>
+
+	<body>
+		<sticky-header id="header">
+			<div class="announcement" data-announcement>Free shipping · ends Sunday</div>
+			<header class="site-header">
+				<span class="brand">Scroll test</span>
+				<nav class="site-nav">
+					<a href="#">Shop</a>
+					<a href="#">About</a>
+					<a href="#">Cart</a>
+				</nav>
+			</header>
+		</sticky-header>
+
+		<main>
+			<div class="block">
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+			<div class="block">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+			<div class="block">
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+			<div class="block">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+			<div class="block">
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+			<div class="block">
+				<div class="tile"></div>
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+			<div class="block">
+				<div class="tile"></div>
+				<div class="tile"></div>
+			</div>
+		</main>
+
+		<div class="readout">
+			<span class="offset" id="out-offset">0.00</span>
+			<div class="row">
+				<span>y <b id="out-y">0.0</b></span>
+				<span>Δ <b id="out-delta">0.00</b></span>
+				<span
+					>max <b id="out-max">0.00</b> <button type="button" id="reset-max">reset</button></span
+				>
+			</div>
+			<div class="row">
+				<span>state <b id="out-state">—</b></span>
+				<span>motion <b id="out-motion">idle</b></span>
+				<span>hidden <b id="out-hidden">no</b></span>
+			</div>
+			<div class="row">
+				<span>group <b id="out-group">—</b></span>
+				<span>bar <b id="out-bar">—</b></span>
+				<span>event <b id="out-event">—</b></span>
+			</div>
+		</div>
+
+		<script type="module" src="dist/sticky-header.esm.js"></script>
+		<script type="module">
+			const body = document.body;
+			const header = document.getElementById('header');
+			const el = (id) => document.getElementById(id);
+			const outOffset = el('out-offset');
+			const outY = el('out-y');
+			const outDelta = el('out-delta');
+			const outMax = el('out-max');
+			const outState = el('out-state');
+			const outMotion = el('out-motion');
+			const outHidden = el('out-hidden');
+			const outEvent = el('out-event');
+
+			// ---- heights: computed style, read once and on resize only ----
+
+			function readHeights() {
+				const cs = getComputedStyle(body);
+				el('out-group').textContent = cs.getPropertyValue('--header-group-height').trim() || '—';
+				el('out-bar').textContent = cs.getPropertyValue('--announcement-bar-height').trim() || '—';
+			}
+			header.addEventListener('sticky-header:resize', readHeights);
+			addEventListener('load', readHeights);
+
+			// ---- last event ----
+
+			let lastEvent = null;
+			for (const name of ['settle', 'hide', 'show']) {
+				header.addEventListener(`sticky-header:${name}`, (e) => {
+					lastEvent = {
+						name: e.detail?.target ? `${name}:${e.detail.target}` : name,
+						at: performance.now(),
+					};
+				});
+			}
+
+			// ---- loop: inline style read + scrollY + attributes only ----
+
+			let prev = 0;
+			let max = 0;
+			let running = true;
+
+			el('reset-max').addEventListener('click', () => {
+				max = 0;
+				outMax.textContent = '0.00';
+			});
+
+			function frame() {
+				if (!running) return;
+				const raw = body.style.getPropertyValue('--header-group-offset');
+				const offset = parseFloat(raw) || 0;
+				const delta = offset - prev;
+				prev = offset;
+				if (Math.abs(delta) > max) max = Math.abs(delta);
+
+				outOffset.textContent = offset.toFixed(2);
+				outY.textContent = scrollY.toFixed(1);
+				outDelta.textContent = delta.toFixed(2);
+				outMax.textContent = max.toFixed(2);
+
+				outState.textContent = body.getAttribute('data-state') || '—';
+				outMotion.textContent = body.hasAttribute('data-header-tracking')
+					? body.hasAttribute('data-header-locked')
+						? 'moving·lock'
+						: 'moving'
+					: body.hasAttribute('data-header-locked')
+						? 'lock'
+						: 'idle';
+				outHidden.textContent = body.hasAttribute('data-header-hidden') ? 'yes' : 'no';
+				outEvent.textContent = lastEvent
+					? `${lastEvent.name} ${Math.round(performance.now() - lastEvent.at)}ms`
+					: '—';
+
+				requestAnimationFrame(frame);
+			}
+			requestAnimationFrame(frame);
+
+			document.addEventListener('visibilitychange', () => {
+				if (document.hidden) {
+					running = false;
+				} else if (!running) {
+					running = true;
+					prev = parseFloat(body.style.getPropertyValue('--header-group-offset')) || 0;
+					requestAnimationFrame(frame);
+				}
+			});
+		</script>
+	</body>
+</html>
