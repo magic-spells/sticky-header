@@ -207,7 +207,8 @@
 				<span>Δ <b id="out-delta">0.00</b></span>
 				<span
 					>max <b id="out-max">0.00</b> <button type="button" id="reset-max">reset</button>
-					<button type="button" id="hud-toggle">hud: live</button></span
+					<button type="button" id="hud-toggle">hud: live</button>
+					<button type="button" id="engine-toggle">engine: on</button></span
 				>
 			</div>
 			<div class="row">
@@ -307,6 +308,13 @@
 			el('hud-toggle').addEventListener('click', (e) => {
 				hud = !hud;
 				e.target.textContent = hud ? 'hud: live' : 'hud: quiet';
+			});
+
+			// control experiment: disable the engine's per-frame work entirely while
+			// the page keeps scrolling — drops that persist are Safari's, not ours
+			el('engine-toggle').addEventListener('click', (e) => {
+				const off = header.toggleAttribute('disabled');
+				e.target.textContent = off ? 'engine: off' : 'engine: on';
 			});
 
 			el('reset-max').addEventListener('click', () => {
