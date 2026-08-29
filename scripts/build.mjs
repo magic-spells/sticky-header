@@ -107,7 +107,7 @@ async function main() {
 		const server = await createServer({
 			configFile: false,
 			root: 'demo',
-			server: { port: 3090, open: true, strictPort: false },
+			server: { port: 3090, open: true, strictPort: false, host: true },
 			plugins: [liveReload('demo/dist')],
 		});
 		await server.listen();
