@@ -212,6 +212,8 @@
 			<div class="row">
 				<span>yfrac <b id="out-yfrac">0.000</b></span>
 				<span>rfrac <b id="out-rfrac">0.000</b></span>
+				<span>raf <b id="out-rafhz">—</b>Hz</span>
+				<span>yupd <b id="out-yhz">—</b>Hz</span>
 			</div>
 			<div class="row">
 				<span>state <b id="out-state">—</b></span>
@@ -279,6 +281,15 @@
 			let maxYFrac = 0;
 			let maxRectFrac = 0;
 
+			// rolling 1s rates: how often rAF fires vs how often scrollY changes.
+			// Read DURING a drag — yupd is naturally 0 while nothing scrolls.
+			const outRafHz = el('out-rafhz');
+			const outYHz = el('out-yhz');
+			let frames = 0;
+			let yChanges = 0;
+			let lastSeenY = scrollY;
+			let windowStart = performance.now();
+
 			el('reset-max').addEventListener('click', () => {
 				max = 0;
 				maxYFrac = 0;
@@ -307,6 +318,21 @@
 				if (rf > maxRectFrac) maxRectFrac = rf;
 				outYfrac.textContent = maxYFrac.toFixed(3);
 				outRfrac.textContent = maxRectFrac.toFixed(3);
+
+				frames++;
+				if (scrollY !== lastSeenY) {
+					yChanges++;
+					lastSeenY = scrollY;
+				}
+				const now = performance.now();
+				if (now - windowStart >= 1000) {
+					const secs = (now - windowStart) / 1000;
+					outRafHz.textContent = String(Math.round(frames / secs));
+					outYHz.textContent = String(Math.round(yChanges / secs));
+					frames = 0;
+					yChanges = 0;
+					windowStart = now;
+				}
 
 				outState.textContent = body.getAttribute('data-state') || '—';
 				outMotion.textContent = body.hasAttribute('data-header-tracking')
