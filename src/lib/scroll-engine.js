@@ -38,10 +38,17 @@
   reveal boundary exists, the offset is POSITION-based rather than
   direction-based, so the bars above the boundary behave exactly like page
   content — away going down, back at the same scroll position going up.
+
+  Finally, `tracking-smoothing` is a PUBLICATION-boundary effect and nothing
+  else. The state machine, the thresholds, the stops and the anchors all run on
+  the raw 1:1 offset; only the number handed to CSS is eased toward it. Which
+  means anything that takes an applied transform back out of a measured rect
+  has to read what CSS actually resolved (`appliedOffset`) rather than the raw
+  value — see _pinned() and _readRiders().
 */
 
 import { makeSettleEase } from './easing.js';
-import { ScrollHandler, clamp } from './scroll-handler.js';
+import { ScrollHandler, expApproach, clamp } from './scroll-handler.js';
 
 const TOP_THRESHOLD = 8; // px from the very top still considered "top"
 const BINARY_DELTA = 5; // reduced-motion: min delta before the offset flips
@@ -60,7 +67,11 @@ const ScrollEngine = {
 	header: null,
 	riders: new Set(),
 
+	// the RAW offset: 1:1 with the scroll, and what every decision below is made
+	// against. `published` is what CSS is given — the same number unless
+	// tracking-smoothing is on.
 	offset: 0,
+	published: 0,
 	motion: 'idle',
 
 	// mirror of the handler's clamped position. The handler owns the delta base;
@@ -92,6 +103,22 @@ const ScrollEngine = {
 	handlers: {},
 
 	/**
+	 * The offset CSS is currently resolving against — the last value actually
+	 * WRITTEN to `--header-group-offset`, not the raw one just computed.
+	 *
+	 * Everything that takes an applied transform back OUT of a measured rect has
+	 * to use this. The two numbers are close with smoothing off (they differ by
+	 * the write epsilon, and by a re-clamp that lands between frames) and openly
+	 * different with it on, where the raw offset runs 1:1 while the published one
+	 * eases behind it. Subtracting a translate the browser has not applied is how
+	 * the pinned test starts oscillating and riders start flickering.
+	 * @returns {number} Applied offset in px
+	 */
+	get appliedOffset() {
+		return this.lastWritten === null ? 0 : this.lastWritten;
+	},
+
+	/**
 	 * Registers the single <sticky-header>. A second host is rejected — the
 	 * engine writes one global offset, so two would fight over it.
 	 * @param {HTMLElement} header - The host element
@@ -104,6 +131,7 @@ const ScrollEngine = {
 		}
 		this.header = header;
 		this.offset = 0;
+		this.published = 0;
 		this.lastWritten = null;
 		this.settle = null;
 		this.motion = 'idle';
@@ -129,6 +157,7 @@ const ScrollEngine = {
 		if (this.header !== header) return;
 		this.header = null;
 		this.offset = 0;
+		this.published = 0;
 		this.settle = null;
 		this.motion = 'idle';
 		// nothing left to re-check, and leaving it set would hold the loop awake
@@ -367,6 +396,18 @@ const ScrollEngine = {
 	 */
 	requestSettle(to, { reason = to < 0 ? 'hide' : 'show', forced = false } = {}) {
 		const _ = this;
+
+		/*
+		  Hand off from the PUBLISHED position first. Under tracking-smoothing the
+		  group is visually at `published` while the raw offset has already run
+		  ahead of it, and a tween starting from the raw value would snap the group
+		  by the whole lag on its first frame. Adopting it is also what reconverges
+		  the two numbers: from here on the tween drives both, and every test below
+		  (the epsilon guard included) is asking about the position the user can
+		  actually see. With smoothing off the two are equal and this is a no-op.
+		*/
+		if (_.published !== _.offset) _.offset = _.published;
+
 		const settle = _.settle;
 		if (settle && settle.to === to) {
 			// same destination: upgrade in place rather than restarting the tween,
@@ -436,6 +477,10 @@ const ScrollEngine = {
 	 */
 	reclamp(groupHeight) {
 		this.offset = clamp(this.offset, -groupHeight, 0);
+		// the published value is its own number under tracking-smoothing, and it is
+		// the one CSS is holding — leaving it outside the new range would keep the
+		// group parked off-screen while the raw offset eased away from it
+		this.published = clamp(this.published, -groupHeight, 0);
 		const settle = this.settle;
 		if (!settle) return;
 		settle.to = clamp(settle.to, -groupHeight, 0);
@@ -461,9 +506,12 @@ const ScrollEngine = {
 
 	/**
 	 * Whether the group has reached its pinned position. Tested against the
-	 * UNtranslated top — `rect.top` already carries the transform, so the offset
-	 * has to be taken back out of it or the check oscillates on the show
-	 * overshoot, where `offset > 0` drags the rect below `stickyTop`.
+	 * UNtranslated top — `rect.top` already carries the transform, so the applied
+	 * offset has to be taken back out of it or the check oscillates on the show
+	 * overshoot, where a positive offset drags the rect below `stickyTop`.
+	 *
+	 * It is `appliedOffset`, not the raw one: the rect reflects the last value
+	 * CSS was given, which under tracking-smoothing is a different number.
 	 *
 	 * The host may or may not BE the translating element, though: the documented
 	 * `position: fixed` workaround sets `transform: none` here and moves the
@@ -483,7 +531,7 @@ const ScrollEngine = {
 		const header = this.header;
 		if (!header) return false;
 		const rect = header.getBoundingClientRect();
-		const applied = getComputedStyle(header).transform === 'none' ? 0 : this.offset;
+		const applied = getComputedStyle(header).transform === 'none' ? 0 : this.appliedOffset;
 		return rect.top - applied <= header._geometry.stickyTop + 0.5;
 	},
 
@@ -594,7 +642,7 @@ const ScrollEngine = {
 	 */
 	onFrame(packet) {
 		const _ = this;
-		const { y, delta, now } = packet;
+		const { y, delta, dt, now } = packet;
 		const reduced = packet.reducedMotion;
 
 		_.y = y;
@@ -698,6 +746,21 @@ const ScrollEngine = {
 			// unlocked frame. Inside the glide the anchor is the mapping's own
 			// state, owned by _glideOffset() and the tween sync.
 			if (!glide) _.revealAnchor = y + _.offset;
+
+			/*
+			  The publication boundary, and the ONLY place smoothing exists.
+
+			  Everything above ran on the raw offset. `tracking-smoothing` eases the
+			  number CSS is given toward it with a time constant, so a scroll that
+			  arrives in coarse steps is published as a continuous move. It applies
+			  only while tracking — both the direction-based mode and the glide:
+			  a settle is a tween that is already smooth and must not be smoothed
+			  twice, and at idle the published value snaps to the raw one so every
+			  resting stop is landed on exactly. tau 0 (the default) resolves to the
+			  raw value outright, which is the whole opt-out.
+			*/
+			const tau = _.motion === 'tracking' ? header._config.trackingSmoothing : 0;
+			_.published = expApproach(_.published, _.offset, dt, tau);
 		}
 
 		// ---- writes ----
@@ -711,14 +774,22 @@ const ScrollEngine = {
 		  Keep the loop alive only while something is actually moving; a zero-delta
 		  frame with nothing pending lets it sleep, and the handler's own
 		  movement-armed rest (or the next scroll event) is what wakes it to finish
-		  the job.
+		  the job. The last clause is smoothing's: the published value can still be
+		  converging after the raw one has stopped, and it has to reach the raw
+		  value before the loop is allowed to sleep or it parks a fraction short.
 		*/
-		return _.motion === 'settling' || (_.motion === 'tracking' && delta !== 0) || _.restDue;
+		return (
+			_.motion === 'settling' ||
+			(_.motion === 'tracking' && delta !== 0) ||
+			_.restDue ||
+			Math.abs(_.published - _.offset) > WRITE_EPSILON
+		);
 	},
 
 	_writeOffset() {
 		if (!this.header) return;
-		const offset = this.offset;
+		// the PUBLISHED value, which is the raw offset unless smoothing is on
+		const offset = this.published;
 		const settled = this.motion === 'idle';
 		// the final easing steps fall under the write epsilon, so a settle that
 		// just finished force-publishes once or the resting value stays short
@@ -805,9 +876,10 @@ const ScrollEngine = {
 	*/
 	_readRiders() {
 		if (!this.riders.size) return null;
-		// the RAW offset, overshoot included — this has to match what CSS is
-		// actually resolving the inset against, or `[stuck]` flickers on bounce
-		const offset = this.header ? this.offset : 0;
+		// the APPLIED offset, overshoot included — this has to match what CSS is
+		// actually resolving the inset against, or `[stuck]` flickers on bounce.
+		// Under tracking-smoothing that is the published value, not the raw one.
+		const offset = this.header ? this.appliedOffset : 0;
 		const reads = [];
 		for (const rider of this.riders) {
 			if (rider.hasAttribute('disabled')) {
