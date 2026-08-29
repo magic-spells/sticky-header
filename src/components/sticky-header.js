@@ -19,6 +19,7 @@ const DEFAULTS = {
 	settleThreshold: 0.5,
 	settleDuration: 900,
 	settleOvershoot: 0.05,
+	trackingSmoothing: 0,
 };
 
 const HIDE_MODES = ['none', 'mobile', 'desktop', 'both'];
@@ -95,6 +96,7 @@ class StickyHeader extends HTMLElement {
 			'settle-threshold',
 			'settle-duration',
 			'settle-overshoot',
+			'tracking-smoothing',
 			'lock',
 			'locked',
 			'disabled',
@@ -242,7 +244,8 @@ class StickyHeader extends HTMLElement {
 	#onPointerLeave() {
 		this.#hovered = false;
 		// normal rules resume immediately; no phantom delta has accumulated
-		// because lastScrollY keeps updating every frame while locked
+		// because the scroll handler owns the delta base and keeps advancing it
+		// every frame, locked or not
 		ScrollEngine.tick();
 	}
 
@@ -287,6 +290,14 @@ class StickyHeader extends HTMLElement {
 				DEFAULTS.settleOvershoot,
 				0,
 				0.2
+			),
+			// 0 is off, and off is the default: tracking is 1:1 with the scroll
+			// unless the author opts into lagging the published value behind it
+			trackingSmoothing: parseNumber(
+				_.getAttribute('tracking-smoothing'),
+				DEFAULTS.trackingSmoothing,
+				0,
+				1000
 			),
 		};
 	}
@@ -529,7 +540,10 @@ class StickyHeader extends HTMLElement {
 		// not: the difference measures `true + offset` and the offset has to come
 		// back out. Measured hidden at −129 that would read 64 − 129 = −65, clamp
 		// to 0, and publish "nothing tagged" until the next measure at rest.
-		const carried = getComputedStyle(_).transform === 'none' ? ScrollEngine.offset : 0;
+		//
+		// It is the APPLIED offset, not the raw one: the rect carries whatever CSS
+		// last resolved, which under tracking-smoothing lags the raw value.
+		const carried = getComputedStyle(_).transform === 'none' ? ScrollEngine.appliedOffset : 0;
 		let boundary = null;
 
 		for (const element of targets) {
