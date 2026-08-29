@@ -266,11 +266,11 @@ const ScrollEngine = {
 
 	/*
 	  Viewport change. This is the `resize` callback rather than `rebase('resize')`
-	  on purpose: the handler only rebases a resize when it decides to quiet one,
-	  and with `quietOnHeightResize` off a height-only change reports no rebase at
-	  all. Geometry still has to be re-measured for it — the engine's half of a
-	  resize is not the anchor, it is the fact that every cached height and rider
-	  inset may now be stale.
+	  on purpose: the handler only rebases a resize when it quiets one, and a
+	  height-only change (mobile URL bar, soft keyboard) never quiets, so it
+	  reports no rebase at all. Geometry still has to be re-measured for it — the
+	  engine's half of a resize is not the anchor, it is the fact that every
+	  cached height and rider inset may now be stale.
 	*/
 	onResize() {
 		this.header?._measure();

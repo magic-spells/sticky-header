@@ -184,7 +184,6 @@ function safeCall(fn, arg) {
 	}
 }
 var ScrollHandler = {
-	quietOnHeightResize: false,
 	/** @type {Array<object>} Subscriptions, in subscription order. */
 	_subs: [],
 	_listening: false,
@@ -402,7 +401,7 @@ var ScrollHandler = {
 			stableHeight: refreshed.stableHeight
 		};
 		_._refreshMaxScroll();
-		if (widthChanged || _.quietOnHeightResize) {
+		if (widthChanged) {
 			_.quiet();
 			_.rebase("resize");
 		}
@@ -519,7 +518,6 @@ var ScrollHandler = {
 		_._lastEventY = 0;
 		_._maxScrollY = 0;
 		_._lastWidth = 0;
-		_.quietOnHeightResize = false;
 	}
 };
 var SHOW_DURATION_SCALE = .85;
@@ -1753,6 +1751,6 @@ var StickyContent = class extends HTMLElement {
 };
 if (!customElements.get("sticky-content")) customElements.define("sticky-content", StickyContent);
 //#endregion
-export { SETTLE_LINEAR_CURVE, ScrollHandler, StickyContent, StickyHeader, makeSettleEase };
+export { SETTLE_LINEAR_CURVE, StickyContent, StickyHeader, makeSettleEase };
 
 //# sourceMappingURL=sticky-header.esm.js.map

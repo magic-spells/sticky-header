@@ -127,20 +127,6 @@ function safeCall(fn, arg) {
 }
 
 const ScrollHandler = {
-	/*
-	  Height-only viewport resizes (mobile URL-bar collapse/expand, a soft
-	  keyboard) do NOT quiet, by decision. Quieting was the original default —
-	  it swallows the phantom scroll deltas iOS reports while that chrome
-	  slides — but on-device testing (real iPhone, 2026-08-28) showed the cost
-	  is far worse than the disease: iOS toggles the URL bar on every scroll
-	  direction REVERSAL, so every reversal opened a 100ms quiet window that
-	  zeroed and rebased away real deltas, freezing tracking for ~70-100px.
-	  With it false, response is near-immediate and no phantom-delta artifacts
-	  were observed. The flag is kept so a consumer can opt back in. Width
-	  changes (a real resize or a rotation) always quiet, regardless.
-	*/
-	quietOnHeightResize: false,
-
 	/** @type {Array<object>} Subscriptions, in subscription order. */
 	_subs: [],
 
@@ -462,11 +448,24 @@ const ScrollHandler = {
 
 		  A HEIGHT-ONLY change is almost always mobile chrome: the URL bar
 		  collapsing or expanding, or a soft keyboard. The page did not reflow
-		  horizontally and the scroll position is still the user's, so by
-		  default it does NOT quiet — see `quietOnHeightResize` above for the
-		  on-device evidence. Set that flag true to quiet these too.
+		  horizontally and the scroll position is still the user's, so it NEVER
+		  quiets — deltas stay live. Either way the metrics are refreshed and
+		  `resize` is emitted, because anything resolving ranges against the
+		  viewport still has to re-resolve them.
+
+		  This is fixed behavior, not an option, deliberately: normalizing
+		  scroll across desktop and mobile is the whole point of this module,
+		  and a normalization layer has opinions, not toggles. Quieting
+		  height-only resizes was the original behavior, and on-device testing
+		  (real iPhone, 2026-08-28) showed why it had to go — iOS toggles the
+		  URL bar on every scroll direction REVERSAL, so every reversal opened a
+		  100ms quiet window that zeroed and rebased away real deltas, freezing
+		  tracking for ~70-100px per reversal. That is far worse than the
+		  phantom deltas it was there to swallow. If phantom deltas ever do
+		  surface in some environment, the fix belongs inside this
+		  normalization, not in a flag handed to consumers.
 		*/
-		if (widthChanged || _.quietOnHeightResize) {
+		if (widthChanged) {
 			_.quiet();
 			_.rebase('resize');
 		}
@@ -667,7 +666,6 @@ const ScrollHandler = {
 		_._lastEventY = 0;
 		_._maxScrollY = 0;
 		_._lastWidth = 0;
-		_.quietOnHeightResize = false;
 	},
 };
 

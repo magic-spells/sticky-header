@@ -188,7 +188,6 @@
 		}
 	}
 	var ScrollHandler = {
-		quietOnHeightResize: false,
 		/** @type {Array<object>} Subscriptions, in subscription order. */
 		_subs: [],
 		_listening: false,
@@ -406,7 +405,7 @@
 				stableHeight: refreshed.stableHeight
 			};
 			_._refreshMaxScroll();
-			if (widthChanged || _.quietOnHeightResize) {
+			if (widthChanged) {
 				_.quiet();
 				_.rebase("resize");
 			}
@@ -523,7 +522,6 @@
 			_._lastEventY = 0;
 			_._maxScrollY = 0;
 			_._lastWidth = 0;
-			_.quietOnHeightResize = false;
 		}
 	};
 	var SHOW_DURATION_SCALE = .85;
@@ -1758,7 +1756,6 @@
 	if (!customElements.get("sticky-content")) customElements.define("sticky-content", StickyContent);
 	//#endregion
 	exports.SETTLE_LINEAR_CURVE = SETTLE_LINEAR_CURVE;
-	exports.ScrollHandler = ScrollHandler;
 	exports.StickyContent = StickyContent;
 	exports.StickyHeader = StickyHeader;
 	exports.makeSettleEase = makeSettleEase;

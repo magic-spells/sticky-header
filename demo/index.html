@@ -1448,13 +1448,6 @@
 					</div>
 				</div>
 
-				<div class="field">
-					<span class="group-label">scroll handler</span>
-					<div class="radios">
-						<label> <input type="checkbox" id="quiet-height" />quietOnHeightResize </label>
-					</div>
-				</div>
-
 				<div class="divider"></div>
 
 				<div class="buttons">
@@ -1512,10 +1505,6 @@
 
 		<script type="module" src="dist/sticky-header.esm.js"></script>
 		<script type="module">
-			// same URL as the tag above, so this is the same module instance — the
-			// scroll handler is a singleton and the page has to reach THAT one
-			import { ScrollHandler } from './dist/sticky-header.esm.js';
-
 			const header = document.getElementById('header');
 			const body = document.body;
 			const dialog = document.getElementById('menu-dialog');
@@ -1545,19 +1534,11 @@
 			bindSlider('duration', 'settle-duration', (v) => `${v}ms`);
 			bindSlider('overshoot', 'settle-overshoot', (v) => Number(v).toFixed(3));
 
-			// the two levers being A/B tested on a real phone
+			// the lever being A/B tested on a real phone
 			document.getElementById('smoothing-modes').addEventListener('change', (e) => {
 				const ms = Number(e.target.value);
 				if (ms > 0) header.setAttribute('tracking-smoothing', String(ms));
 				else header.removeAttribute('tracking-smoothing');
-			});
-
-			const quietHeight = document.getElementById('quiet-height');
-			// seed from the live value, never a hardcoded `checked` — the default
-			// has changed once already and the box has to keep reflecting it
-			quietHeight.checked = ScrollHandler.quietOnHeightResize;
-			quietHeight.addEventListener('change', (e) => {
-				ScrollHandler.quietOnHeightResize = e.target.checked;
 			});
 
 			// ---- buttons ----
