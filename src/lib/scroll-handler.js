@@ -129,15 +129,17 @@ function safeCall(fn, arg) {
 const ScrollHandler = {
 	/*
 	  Height-only viewport resizes (mobile URL-bar collapse/expand, a soft
-	  keyboard) open a quiet window and rebase by default, which is what the
-	  sticky-header engine has always done. It costs a 100ms hole in delta
-	  reporting on every URL-bar animation, in exchange for swallowing the
-	  phantom scroll deltas iOS reports while that chrome slides. Which trade is
-	  better is an on-device question, so it is a flag rather than a decision —
-	  set it false to keep deltas live through a height-only resize. Width
+	  keyboard) do NOT quiet, by decision. Quieting was the original default —
+	  it swallows the phantom scroll deltas iOS reports while that chrome
+	  slides — but on-device testing (real iPhone, 2026-08-28) showed the cost
+	  is far worse than the disease: iOS toggles the URL bar on every scroll
+	  direction REVERSAL, so every reversal opened a 100ms quiet window that
+	  zeroed and rebased away real deltas, freezing tracking for ~70-100px.
+	  With it false, response is near-immediate and no phantom-delta artifacts
+	  were observed. The flag is kept so a consumer can opt back in. Width
 	  changes (a real resize or a rotation) always quiet, regardless.
 	*/
-	quietOnHeightResize: true,
+	quietOnHeightResize: false,
 
 	/** @type {Array<object>} Subscriptions, in subscription order. */
 	_subs: [],
@@ -460,10 +462,9 @@ const ScrollHandler = {
 
 		  A HEIGHT-ONLY change is almost always mobile chrome: the URL bar
 		  collapsing or expanding, or a soft keyboard. The page did not reflow
-		  horizontally and the scroll position is still the user's — but iOS
-		  reports phantom scroll deltas for the whole chrome animation, which is
-		  why quieting is the default. `quietOnHeightResize` exists so an
-		  on-device test can flip that without touching this file.
+		  horizontally and the scroll position is still the user's, so by
+		  default it does NOT quiet — see `quietOnHeightResize` above for the
+		  on-device evidence. Set that flag true to quiet these too.
 		*/
 		if (widthChanged || _.quietOnHeightResize) {
 			_.quiet();
@@ -666,7 +667,7 @@ const ScrollHandler = {
 		_._lastEventY = 0;
 		_._maxScrollY = 0;
 		_._lastWidth = 0;
-		_.quietOnHeightResize = true;
+		_.quietOnHeightResize = false;
 	},
 };
 

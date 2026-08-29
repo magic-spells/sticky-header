@@ -188,7 +188,7 @@
 		}
 	}
 	var ScrollHandler = {
-		quietOnHeightResize: true,
+		quietOnHeightResize: false,
 		/** @type {Array<object>} Subscriptions, in subscription order. */
 		_subs: [],
 		_listening: false,
@@ -523,7 +523,7 @@
 			_._lastEventY = 0;
 			_._maxScrollY = 0;
 			_._lastWidth = 0;
-			_.quietOnHeightResize = true;
+			_.quietOnHeightResize = false;
 		}
 	};
 	var SHOW_DURATION_SCALE = .85;

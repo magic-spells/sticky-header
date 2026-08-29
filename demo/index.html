@@ -1451,7 +1451,7 @@
 				<div class="field">
 					<span class="group-label">scroll handler</span>
 					<div class="radios">
-						<label> <input type="checkbox" id="quiet-height" checked />quietOnHeightResize </label>
+						<label> <input type="checkbox" id="quiet-height" />quietOnHeightResize </label>
 					</div>
 				</div>
 
@@ -1552,7 +1552,11 @@
 				else header.removeAttribute('tracking-smoothing');
 			});
 
-			document.getElementById('quiet-height').addEventListener('change', (e) => {
+			const quietHeight = document.getElementById('quiet-height');
+			// seed from the live value, never a hardcoded `checked` — the default
+			// has changed once already and the box has to keep reflecting it
+			quietHeight.checked = ScrollHandler.quietOnHeightResize;
+			quietHeight.addEventListener('change', (e) => {
 				ScrollHandler.quietOnHeightResize = e.target.checked;
 			});
 
