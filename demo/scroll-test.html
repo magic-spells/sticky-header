@@ -159,6 +159,13 @@
 			</header>
 		</sticky-header>
 
+		<!-- resolution probe: rect.top is -scrollY at sub-pixel resolution, for
+		     comparison against window.scrollY's (possibly rounded) values -->
+		<div
+			id="probe"
+			aria-hidden="true"
+			style="position: absolute; top: 0; left: 0; width: 1px; height: 1px; visibility: hidden; pointer-events: none"></div>
+
 		<main>
 			<div class="block">
 				<div class="tile"></div>
@@ -201,6 +208,10 @@
 				<span
 					>max <b id="out-max">0.00</b> <button type="button" id="reset-max">reset</button></span
 				>
+			</div>
+			<div class="row">
+				<span>yfrac <b id="out-yfrac">0.000</b></span>
+				<span>rfrac <b id="out-rfrac">0.000</b></span>
 			</div>
 			<div class="row">
 				<span>state <b id="out-state">—</b></span>
@@ -256,9 +267,25 @@
 			let max = 0;
 			let running = true;
 
+			// distance from the nearest integer, so float noise on a whole number
+			// (312.9999…) reads as 0 rather than as a fraction
+			const probe = el('probe');
+			const outYfrac = el('out-yfrac');
+			const outRfrac = el('out-rfrac');
+			const frac = (v) => {
+				const f = Math.abs(v % 1);
+				return Math.min(f, 1 - f);
+			};
+			let maxYFrac = 0;
+			let maxRectFrac = 0;
+
 			el('reset-max').addEventListener('click', () => {
 				max = 0;
+				maxYFrac = 0;
+				maxRectFrac = 0;
 				outMax.textContent = '0.00';
+				outYfrac.textContent = '0.000';
+				outRfrac.textContent = '0.000';
 			});
 
 			function frame() {
@@ -273,6 +300,13 @@
 				outY.textContent = scrollY.toFixed(1);
 				outDelta.textContent = delta.toFixed(2);
 				outMax.textContent = max.toFixed(2);
+
+				const yf = frac(scrollY);
+				if (yf > maxYFrac) maxYFrac = yf;
+				const rf = frac(probe.getBoundingClientRect().top);
+				if (rf > maxRectFrac) maxRectFrac = rf;
+				outYfrac.textContent = maxYFrac.toFixed(3);
+				outRfrac.textContent = maxRectFrac.toFixed(3);
 
 				outState.textContent = body.getAttribute('data-state') || '—';
 				outMotion.textContent = body.hasAttribute('data-header-tracking')
