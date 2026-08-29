@@ -242,7 +242,8 @@ class StickyHeader extends HTMLElement {
 	#onPointerLeave() {
 		this.#hovered = false;
 		// normal rules resume immediately; no phantom delta has accumulated
-		// because lastScrollY keeps updating every frame while locked
+		// because the scroll handler owns the delta base and keeps advancing it
+		// every frame, locked or not
 		ScrollEngine.tick();
 	}
 

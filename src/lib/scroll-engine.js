@@ -1,8 +1,16 @@
 /*
   Scroll engine for <sticky-header>.
 
-  A module singleton — one scroll listener, one rAF loop, one offset value,
-  shared by the single <sticky-header> and every <sticky-content> rider.
+  A module singleton — one offset value, shared by the single <sticky-header>
+  and every <sticky-content> rider.
+
+  The scroll SIGNAL is not this file's job. Window listeners, the rAF loop,
+  position clamping, quiet windows, velocity, movement-armed rest detection and
+  scroll-restoration adoption all live in ScrollHandler, which the engine
+  subscribes to once. What arrives here is a per-frame packet of numbers that
+  are already correct on mobile. Everything below is what the engine adds on
+  top of that signal: the three resting stops, the settle tween, the motion
+  state machine, and the one published offset.
 
   The engine owns motion only. It never touches `transform` and never reads
   component attributes directly: it writes `--header-group-offset` on <body>
@@ -33,20 +41,20 @@
 */
 
 import { makeSettleEase } from './easing.js';
+import { ScrollHandler, clamp } from './scroll-handler.js';
 
 const TOP_THRESHOLD = 8; // px from the very top still considered "top"
-const IDLE_MS = 120; // fallback scroll-idle timeout where scrollend is missing
-const RESIZE_QUIET_MS = 100; // window after a resize in which deltas are ignored
 const BINARY_DELTA = 5; // reduced-motion: min delta before the offset flips
 const WRITE_EPSILON = 0.05; // px the offset must move before it's written again
 const SHOW_DURATION_SCALE = 0.85; // show settles slightly faster than hide
 
+/*
+  The engine keeps its own reduced-motion query for ONE reason: a preference
+  flip has to cancel an in-flight tween and re-anchor, which is a reaction to a
+  motion preference rather than to a scroll. The per-frame READ is gone — the
+  packet carries `reducedMotion`, resolved once per frame by the handler.
+*/
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-
-// clamp helper: keeps a number within a range
-function clamp(value, min, max) {
-	return Math.max(min, Math.min(max, value));
-}
 
 const ScrollEngine = {
 	header: null,
@@ -55,22 +63,24 @@ const ScrollEngine = {
 	offset: 0,
 	motion: 'idle',
 
-	lastScrollY: 0,
-	maxScrollY: 0,
+	// mirror of the handler's clamped position. The handler owns the delta base;
+	// this exists for _settleTarget()'s safety floor and _trackable()'s reveal
+	// threshold, and it keeps updating every frame while locked, so unlocking
+	// never releases a phantom delta.
+	y: 0,
 	lastWritten: null,
-	resizeUntil: 0,
 	reducedAnchor: 0,
 	// scroll position the position-based glide measures from — the y at which
 	// the group was last fully shown while pinned
 	revealAnchor: 0,
-	rebaseOnNextScroll: false,
 	// the resting stops moved and the offset has to be re-evaluated against them
 	stopsDirty: false,
+	// a settle landed and the stop it landed on has to be re-checked
+	restDue: false,
 
 	settle: null,
-	rafId: null,
-	idleTimer: null,
-	listening: false,
+	/** @type {object | null} The ScrollHandler subscription. */
+	sub: null,
 
 	// events are queued during compute and dispatched in the write phase, so a
 	// listener can never run between a read and the write that depends on it
@@ -98,16 +108,15 @@ const ScrollEngine = {
 		this.settle = null;
 		this.motion = 'idle';
 		this.revealAnchor = 0;
+		this.restDue = false;
 		this.start();
-		this.rebase();
-		// scroll restoration can land after this point; the first scroll that
-		// arrives is a restore, not a gesture, so it must not become a delta.
-		// Only while a restoration can still ARRIVE, though — load/pageshow are
-		// what clear this flag, and they never fire again for a header mounted
-		// after them (SPA, late upgrade). Such a host has already adopted the
-		// current position from the rebase() above, so arming here would leave
-		// the flag set forever and eat its first real gesture.
-		this.rebaseOnNextScroll = document.readyState !== 'complete';
+		// adopt the current position with no delta. Scroll restoration can still
+		// land after this point, and adopting THAT is the handler's job: it arms
+		// its own restore flag while the document is loading and clears it on
+		// load/pageshow, so a header mounted after those (SPA, late upgrade) is
+		// left with the position it just adopted rather than eating its first
+		// real gesture.
+		ScrollHandler.rebase();
 		this.tick();
 		return true;
 	},
@@ -122,6 +131,8 @@ const ScrollEngine = {
 		this.offset = 0;
 		this.settle = null;
 		this.motion = 'idle';
+		// nothing left to re-check, and leaving it set would hold the loop awake
+		this.restDue = false;
 		this.pendingEvents.length = 0;
 		this._clearBody();
 		if (!this.riders.size) this.stop();
@@ -146,156 +157,134 @@ const ScrollEngine = {
 		if (!this.riders.size && !this.header) this.stop();
 	},
 
+	/** Subscribes to the scroll signal. The first consumer starts the handler. */
 	start() {
-		if (this.listening) return;
 		const _ = this;
-		_.handlers.scroll = _.handlers.scroll || _.onScroll.bind(_);
-		_.handlers.scrollEnd = _.handlers.scrollEnd || _.onScrollIdle.bind(_);
-		_.handlers.resize = _.handlers.resize || _.onResize.bind(_);
+		if (_.sub) return;
+
 		_.handlers.frame = _.handlers.frame || _.onFrame.bind(_);
-		_.handlers.restore = _.handlers.restore || _.onRestore.bind(_);
+		_.handlers.rest = _.handlers.rest || _.onRest.bind(_);
+		_.handlers.rebase = _.handlers.rebase || _.onRebase.bind(_);
+		_.handlers.resize = _.handlers.resize || _.onResize.bind(_);
 		_.handlers.motionPreference = _.handlers.motionPreference || _.onMotionPreference.bind(_);
 
-		window.addEventListener('scroll', _.handlers.scroll, { passive: true });
-		window.addEventListener('scrollend', _.handlers.scrollEnd, { passive: true });
-		window.addEventListener('resize', _.handlers.resize, { passive: true });
-		window.visualViewport?.addEventListener('resize', _.handlers.resize, { passive: true });
-		// browser scroll restoration lands after DOMContentLoaded
-		window.addEventListener('load', _.handlers.restore, { passive: true });
-		window.addEventListener('pageshow', _.handlers.restore, { passive: true });
 		reducedMotion.addEventListener('change', _.handlers.motionPreference);
 
-		_.listening = true;
-		_.refreshMaxScroll();
-		_.lastScrollY = clamp(window.scrollY, 0, _.maxScrollY);
-		_.reducedAnchor = _.lastScrollY;
+		_.sub = ScrollHandler.subscribe({
+			frame: _.handlers.frame,
+			rest: _.handlers.rest,
+			rebase: _.handlers.rebase,
+			resize: _.handlers.resize,
+		});
+
+		// subscribing is what starts the handler, so the position is only readable
+		// afterwards. It schedules a frame rather than running one, so nothing has
+		// called back yet.
+		_.y = ScrollHandler.y;
+		_.reducedAnchor = _.y;
 	},
 
 	stop() {
 		const _ = this;
-		window.removeEventListener('scroll', _.handlers.scroll);
-		window.removeEventListener('scrollend', _.handlers.scrollEnd);
-		window.removeEventListener('resize', _.handlers.resize);
-		window.visualViewport?.removeEventListener('resize', _.handlers.resize);
-		window.removeEventListener('load', _.handlers.restore);
-		window.removeEventListener('pageshow', _.handlers.restore);
 		reducedMotion.removeEventListener('change', _.handlers.motionPreference);
-		clearTimeout(_.idleTimer);
-		if (_.rafId) cancelAnimationFrame(_.rafId);
-		_.rafId = null;
-		_.idleTimer = null;
-		_.listening = false;
+		// the last unsubscription is what detaches the handler's own listeners
+		_.sub?.unsubscribe();
+		_.sub = null;
 		_.motion = 'idle';
+		_.restDue = false;
 	},
 
 	/** Wakes the rAF loop without a scroll — used by observers and the API. */
 	tick() {
-		if (!this.listening) return;
-		this.handlers.frame = this.handlers.frame || this.onFrame.bind(this);
-		if (!this.rafId) this.rafId = requestAnimationFrame(this.handlers.frame);
+		this.sub?.tick();
 	},
 
-	/** Re-anchors scroll tracking to the current position, producing no delta. */
+	/**
+	 * Re-anchors scroll tracking to the current position, producing no delta.
+	 * Goes through the handler, which owns the delta base — the engine's own
+	 * anchors are then rebuilt in onRebase(), the single place that does it.
+	 */
 	rebase() {
-		this.refreshMaxScroll();
-		this.lastScrollY = clamp(window.scrollY, 0, this.maxScrollY);
-		this.reducedAnchor = this.lastScrollY;
+		ScrollHandler.rebase();
+	},
+
+	/**
+	 * The position was adopted with no gesture behind it.
+	 * @param {string} reason - 'restore' | 'resize' | 'manual'
+	 */
+	onRebase(reason) {
+		const _ = this;
+		_.y = ScrollHandler.y;
+		_.reducedAnchor = _.y;
 		// the glide anchor is rebased so the CURRENT offset is preserved — moving
 		// it to y outright would snap the bars back into view on every resize
-		this.revealAnchor = this.lastScrollY + this.offset;
-	},
+		_.revealAnchor = _.y + _.offset;
 
-	refreshMaxScroll() {
-		this.maxScrollY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-	},
+		if (reason !== 'restore') return;
 
-	/** Opens a quiet window where scroll deltas are ignored (URL-bar storms). */
-	quiet() {
-		this.resizeUntil = performance.now() + RESIZE_QUIET_MS;
-	},
-
-	/*
-	  Arms the idle fallback. This is driven by actual MOVEMENT, not just by
-	  scroll events: a scroll event can land a frame before the delta it
-	  describes, so the idle it arms can fire, start a settle, and then have
-	  that settle cancelled by the trailing delta. Re-arming from the frame loop
-	  on every non-zero delta means the last real movement always gets the final
-	  word, and iOS momentum keeps pushing rest out until the decay truly ends.
-	*/
-	armIdle() {
-		clearTimeout(this.idleTimer);
-		this.idleTimer = setTimeout(this.handlers.scrollEnd, IDLE_MS);
-	},
-
-	onScroll() {
-		if (this.rebaseOnNextScroll) {
-			// a restored scroll position, not a gesture — adopt it with no delta
-			this.rebaseOnNextScroll = false;
-			this.rebase();
-		}
-		if (this.motion !== 'settling') this.motion = 'tracking';
-		this.armIdle();
-		this.tick();
-	},
-
-	/** Scroll restoration / bfcache return: adopt the position, stay visible. */
-	onRestore() {
-		this.rebaseOnNextScroll = false;
-		this.rebase();
-		if (this._glideMode()) {
+		if (_._glideMode()) {
 			// a restore is not a gesture, and the glide is ABSOLUTE: a bar with no
 			// reason to stay pinned belongs exactly where the page put it, so the
 			// anchor is seeded at the page top rather than preserving the offset.
 			// Landing mid-page must not leave it visible, nor move its return point.
-			this.settle = null;
-			this.motion = 'idle';
-			this.revealAnchor = 0;
+			_.settle = null;
+			_.motion = 'idle';
+			_.revealAnchor = 0;
 		} else {
-			this.requestSettle(0, { reason: 'show', forced: true });
+			_.requestSettle(0, { reason: 'show', forced: true });
 		}
-		this.tick();
+	},
+
+	/*
+	  Viewport change. This is the `resize` callback rather than `rebase('resize')`
+	  on purpose: the handler only rebases a resize when it decides to quiet one,
+	  and with `quietOnHeightResize` off a height-only change reports no rebase at
+	  all. Geometry still has to be re-measured for it — the engine's half of a
+	  resize is not the anchor, it is the fact that every cached height and rider
+	  inset may now be stale.
+	*/
+	onResize() {
+		this.header?._measure();
+		for (const rider of this.riders) rider._invalidateTop();
 	},
 
 	onMotionPreference() {
 		this.settle = null;
 		this.motion = 'idle';
-		this.rebase();
-		this.tick();
-	},
-
-	onResize() {
-		this.quiet();
-		this.rebase();
-		this.header?._measure();
-		for (const rider of this.riders) rider._invalidateTop();
-		this.tick();
+		// re-anchors and ticks; the handler zeroes its own velocity separately
+		ScrollHandler.rebase();
 	},
 
 	/**
-	 * True scroll rest. Fires from native `scrollend` and from the 120ms
-	 * fallback timer; both land here and the work is idempotent, so iOS
-	 * momentum (which keeps firing `scroll`) can never settle mid-flick.
+	 * True scroll rest, as the handler defines it: movement has actually stopped,
+	 * not merely the scroll events. Idempotent — `scrollend` and the handler's
+	 * fallback both land here and whichever arrives first does the work.
+	 *
+	 * No trailing tick: the handler ticks immediately after emitting this.
 	 */
-	onScrollIdle() {
-		clearTimeout(this.idleTimer);
-		if (this.motion === 'settling') return;
-		this.motion = 'idle';
+	onRest() {
+		const _ = this;
+		if (_.motion === 'settling') return;
+		_.motion = 'idle';
+		// rest IS the re-check, so a pending one is subsumed rather than repeated
+		_.restDue = false;
+		// off-frame, so the pinned test has to take its own rect read here
+		_._settleToStop(_._trackable());
+	},
 
+	/**
+	 * Settles onto the stop the current position belongs at. Shared by the two
+	 * things that ask that question: a true scroll rest, and a settle that has
+	 * just landed somewhere the resting rules would not have chosen.
+	 * @param {boolean} trackable - Whether direction-based tracking applies
+	 */
+	_settleToStop(trackable) {
 		const header = this.header;
-		if (!header) {
-			this.tick();
-			return;
-		}
-
-		const { groupHeight } = header._geometry;
-		if (groupHeight <= 0 || !this._trackable()) {
-			this.tick();
-			return;
-		}
+		if (!header) return;
+		if (header._geometry.groupHeight <= 0 || !trackable) return;
 
 		const target = this._settleTarget();
 		this.requestSettle(target, { reason: target < this.offset ? 'hide' : 'show' });
-		this.tick();
 	},
 
 	/**
@@ -327,7 +316,7 @@ const ScrollEngine = {
 		// a target the safety clamp would never let the offset reach is not a
 		// target: aiming at one starts a tween that can't move, and the settle
 		// event that goes with it would then re-fire at every idle
-		return Math.max(target, -this.lastScrollY);
+		return Math.max(target, -this.y);
 	},
 
 	/**
@@ -377,35 +366,36 @@ const ScrollEngine = {
 	 * @param {object} options - `reason` ('show'|'hide') and `forced`
 	 */
 	requestSettle(to, { reason = to < 0 ? 'hide' : 'show', forced = false } = {}) {
-		const settle = this.settle;
+		const _ = this;
+		const settle = _.settle;
 		if (settle && settle.to === to) {
 			// same destination: upgrade in place rather than restarting the tween,
 			// so a forced request mid-settle doesn't rewind what already played
 			if (forced) settle.forced = true;
 			return;
 		}
-		if (!settle && Math.abs(this.offset - to) <= WRITE_EPSILON) {
-			this.offset = to;
+		if (!settle && Math.abs(_.offset - to) <= WRITE_EPSILON) {
+			_.offset = to;
 			return;
 		}
 
-		const header = this.header;
+		const header = _.header;
 		const config = header ? header._config : null;
 
 		// reduced motion never tweens — the offset flips outright
 		if (reducedMotion.matches) {
-			this.settle = null;
-			this.offset = to;
-			this.motion = 'idle';
-			this.reducedAnchor = this.lastScrollY;
+			_.settle = null;
+			_.offset = to;
+			_.motion = 'idle';
+			_.reducedAnchor = _.y;
 			return;
 		}
 
 		const base = config ? config.settleDuration : 900;
 		const duration = Math.max(1, reason === 'show' ? base * SHOW_DURATION_SCALE : base);
 
-		this.settle = {
-			from: this.offset,
+		_.settle = {
+			from: _.offset,
 			to,
 			reason,
 			forced,
@@ -415,18 +405,26 @@ const ScrollEngine = {
 			start: null,
 			ease: makeSettleEase(config ? config.settleOvershoot : 0.05),
 		};
-		this.motion = 'settling';
+		_.motion = 'settling';
 
-		this.queueEvent('settle', { target: reason, from: this.settle.from, duration });
-		this.tick();
+		_.queueEvent('settle', { target: reason, from: _.settle.from, duration });
+		_.tick();
 	},
 
 	cancelSettle() {
 		if (!this.settle) return;
 		this.settle = null;
 		this.motion = 'tracking';
-		// tracking resumed, so rest has to be re-detected from here
-		this.armIdle();
+		/*
+		  No idle re-arm here, and none is needed. Rest is armed from MOVEMENT, and
+		  the only thing that cancels a settle is a frame carrying |delta| >= 1 —
+		  a frame on which ScrollHandler.onFrame already called _armIdle(), in its
+		  read phase, before dispatching to any subscriber. So by the time this
+		  runs a rest is always owed, which is exactly the guarantee the engine's
+		  own armIdle() used to provide: the last real movement gets the final
+		  word, and the header can never be stranded mid-travel with no timer left
+		  to finish the job.
+		*/
 	},
 
 	/**
@@ -478,7 +476,7 @@ const ScrollEngine = {
 	 * Read per frame rather than cached: the rule can be breakpoint-dependent,
 	 * and a cache would have to be refreshed from wherever CSS might change.
 	 * It sits beside a rect read either way — in the frame's read phase, or off
-	 * it via onScrollIdle → _trackable() — so it adds no thrash of its own.
+	 * it via onRest() → _trackable() — so it adds no thrash of its own.
 	 * @returns {boolean} True while the group is pinned
 	 */
 	_pinned() {
@@ -535,7 +533,7 @@ const ScrollEngine = {
 		if (header._geometry.groupHeight <= 0) return false;
 		if (!(pinned === undefined ? this._pinned() : pinned)) return false;
 
-		return this.lastScrollY > header._config.revealThreshold;
+		return this.y > header._config.revealThreshold;
 	},
 
 	/**
@@ -571,30 +569,37 @@ const ScrollEngine = {
 			this.offset = settle.to;
 			this.settle = null;
 			this.motion = 'idle';
-			// re-check the stop the tween actually landed on. A forced show that
-			// outlived a short gesture can leave the group at 0 mid-page — an
-			// illegal stop once anything is tagged — and the stops themselves may
-			// have moved during the ~900ms it was running. The epsilon guard in
-			// requestSettle makes this free whenever it landed correctly.
-			this.armIdle();
+			/*
+			  Re-check the stop the tween actually landed on. A forced show that
+			  outlived a short gesture can leave the group at 0 mid-page — an illegal
+			  stop once anything is tagged — and the stops themselves may have moved
+			  during the ~900ms it was running.
+
+			  This used to arm the idle timer to get the re-check. Rest is armed from
+			  MOVEMENT now, and a tween completing is not movement, so there may be no
+			  rest owed at all: the question is carried as a flag and answered by the
+			  next frame that is not moving, with the keep-alive in onFrame holding
+			  the loop open for it. That also lands it in the compute phase, where
+			  this frame's `trackable` has already been read — the old path took a
+			  rect read off-frame to answer the same question.
+			*/
+			this.restDue = true;
 		}
 	},
 
-	onFrame(now) {
+	/**
+	 * One frame of the scroll signal. Strict read → compute → write.
+	 * @param {object} packet - The handler's per-frame packet
+	 * @returns {boolean} True to ask the handler for another frame
+	 */
+	onFrame(packet) {
 		const _ = this;
-		_.rafId = null;
+		const { y, delta, now } = packet;
+		const reduced = packet.reducedMotion;
+
+		_.y = y;
 
 		// ---- reads ----
-		let y = window.scrollY;
-		if (y > _.maxScrollY) _.refreshMaxScroll();
-		y = clamp(y, 0, _.maxScrollY);
-
-		let delta = y - _.lastScrollY;
-		_.lastScrollY = y;
-		if (now < _.resizeUntil) delta = 0;
-		// real movement this frame — push scroll-rest detection out from here
-		if (delta !== 0) _.armIdle();
-
 		const header = _.header;
 		// dirty-gated: re-resolves the reveal boundary only when something moved
 		// it, and takes its rect reads here in the read phase with the others
@@ -615,7 +620,16 @@ const ScrollEngine = {
 				_._applyStops(y, glide, trackable);
 			}
 
-			if (reducedMotion.matches) {
+			// a settle landed and its resting place is owed a re-check. Deferred to a
+			// frame with no movement in it: injecting a settle into a live gesture
+			// would cost a frame of 1:1 tracking to a tween that the very next delta
+			// cancels anyway.
+			if (_.restDue && delta === 0 && _.motion !== 'settling') {
+				_.restDue = false;
+				_._settleToStop(trackable);
+			}
+
+			if (reduced) {
 				// binary: no tracking, no tween — flip past a 5px direction delta,
 				// between whichever two stops currently apply
 				if (glide) {
@@ -657,10 +671,10 @@ const ScrollEngine = {
 					_._stepSettle(now);
 				} else if (trackable && delta !== 0) {
 					// the 1:1 core — scroll down hides, scroll up shows, no easing.
-					// Gated on a real delta: a zero-delta tick (a resize, an observer,
-					// an attribute change) must never enter or perpetuate tracking, or
-					// the loop spins for the life of the page and data-header-tracking
-					// never clears.
+					// Gated on a real delta: a zero-delta frame (a resize, an observer,
+					// an attribute change, the handler's own velocity tail) must never
+					// enter or perpetuate tracking, or the loop spins for the life of
+					// the page and data-header-tracking never clears.
 					//
 					// The ceiling is the reveal stop, but only once the group has
 					// actually travelled past it: `max(-topOnlyHeight, offset)` never
@@ -693,10 +707,13 @@ const ScrollEngine = {
 		_._writeRiders(riderReads);
 		_.flushEvents();
 
-		// keep the loop alive only while something is actually moving; a
-		// zero-delta frame lets it sleep, and the armed idle timer (or the next
-		// scroll event) is what wakes it to finish the job
-		if (_.motion === 'settling' || (_.motion === 'tracking' && delta !== 0)) _.tick();
+		/*
+		  Keep the loop alive only while something is actually moving; a zero-delta
+		  frame with nothing pending lets it sleep, and the handler's own
+		  movement-armed rest (or the next scroll event) is what wakes it to finish
+		  the job.
+		*/
+		return _.motion === 'settling' || (_.motion === 'tracking' && delta !== 0) || _.restDue;
 	},
 
 	_writeOffset() {
@@ -827,13 +844,7 @@ const ScrollEngine = {
 	},
 };
 
-export {
-	ScrollEngine,
-	TOP_THRESHOLD,
-	IDLE_MS,
-	RESIZE_QUIET_MS,
-	BINARY_DELTA,
-	WRITE_EPSILON,
-	reducedMotion,
-	clamp,
-};
+export { ScrollEngine, TOP_THRESHOLD, BINARY_DELTA, WRITE_EPSILON, reducedMotion, clamp };
+// IDLE_MS and RESIZE_QUIET_MS moved to the scroll handler along with the timing
+// they describe. Re-exported so this module's surface is unchanged.
+export { IDLE_MS, RESIZE_QUIET_MS } from './scroll-handler.js';
