@@ -71,28 +71,476 @@
 	* enough for the bounce to read correctly at any duration the component uses.
 	*/
 	var SETTLE_LINEAR_CURVE = "linear(0, 0.1062, 0.3275, 0.5628, 0.7602, 0.9018, 0.9893, 1.0339, 1.0492, 1.0473, 1.0374, 1.0255, 1.0148, 1.0068, 1.0016, 0.9988, 0.9976, 0.9975, 0.9979, 0.9985, 0.9991, 0.9995, 0.9998, 1)";
-	var SHOW_DURATION_SCALE = .85;
-	var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+	//#endregion
+	//#region src/lib/viewport-metrics.js
+	/** Parks the probe outside layout, painting, hit-testing and a11y. */
+	var CONTAINER_STYLE = "position: fixed; top: 0; left: 0; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; z-index: -1;";
+	/**
+	* The live viewport height, used until (or unless) a probe exists.
+	* @returns {number} Height in px, 0 with no host environment
+	*/
+	function liveHeight() {
+		return globalThis.visualViewport?.height || globalThis.innerHeight || 0;
+	}
+	var ViewportMetrics = {
+		/** @type {number} Live visual viewport height — moves with mobile chrome. */
+		currentHeight: 0,
+		/** @type {number} `100svh` height — the one mobile chrome cannot move. */
+		stableHeight: 0,
+		/** @type {object | null} The `100svh` element that gets measured. */
+		probe: null,
+		/** @type {object | null} Its hidden wrapper, kept for `_reset()`. */
+		container: null,
+		/**
+		* Creates the probe if it can be created. Safe to call repeatedly.
+		* @returns {object} This singleton
+		*/
+		init() {
+			if (this.probe) return this;
+			if (typeof document === "undefined" || !document.documentElement) return this;
+			const css = globalThis.CSS;
+			if (typeof css?.supports !== "function" || !css.supports("height: 100svh")) return this;
+			const container = document.createElement("div");
+			const probe = document.createElement("div");
+			container.setAttribute("aria-hidden", "true");
+			container.style.cssText = CONTAINER_STYLE;
+			probe.style.height = "100svh";
+			container.appendChild(probe);
+			document.documentElement.appendChild(container);
+			this.container = container;
+			this.probe = probe;
+			return this;
+		},
+		/**
+		* Re-reads both heights.
+		* @returns {object} This singleton, so callers can read straight off it
+		*/
+		refresh() {
+			this.init();
+			const currentHeight = liveHeight();
+			const measured = this.probe ? this.probe.getBoundingClientRect().height : 0;
+			this.currentHeight = currentHeight;
+			this.stableHeight = measured || currentHeight;
+			return this;
+		},
+		/** Test hook: detach the probe so the next `refresh()` starts clean. */
+		_reset() {
+			if (typeof this.container?.remove === "function") this.container.remove();
+			this.container = null;
+			this.probe = null;
+			this.currentHeight = 0;
+			this.stableHeight = 0;
+		}
+	};
+	var REFERENCE_FRAME_MS = 1e3 / 60;
+	var VELOCITY_DECAY_TAU = -16.666666666666668 / Math.log(.76);
+	var EMA_TAU = -16.666666666666668 / Math.log(.85);
+	/**
+	* Keeps a number within a range.
+	* @param {number} value
+	* @param {number} min
+	* @param {number} max
+	* @returns {number}
+	*/
 	function clamp(value, min, max) {
 		return Math.max(min, Math.min(max, value));
 	}
+	/**
+	* Frame-rate-independent exponential approach.
+	*
+	* Moves `current` toward `target` by the fraction of the remaining gap that
+	* `dt` milliseconds is worth at time constant `tau` — about 63% of the gap per
+	* `tau` ms, regardless of how that time was carved into frames. Two runs over
+	* the same wall-clock span land on the same value whether they were ticked at
+	* 60Hz, 120Hz, or through dropped frames.
+	*
+	* Deliberately has no snap threshold: whether a remaining gap is small enough
+	* to close outright is the caller's judgement, and different consumers use
+	* different epsilons (px, progress, opacity).
+	* @param {number} current - Where the value is now
+	* @param {number} target - Where it is heading
+	* @param {number} dt - Elapsed milliseconds
+	* @param {number} tau - Time constant in ms; 0 or less snaps to target
+	* @returns {number} The advanced value
+	*/
+	function expApproach(current, target, dt, tau) {
+		if (!(tau > 0)) return target;
+		return current + (target - current) * (1 - Math.exp(-dt / tau));
+	}
+	/**
+	* Runs a subscriber callback without letting it escape the loop.
+	*
+	* Every callback here fires from inside a rAF callback. A throw there stops
+	* the loop re-arming while `_rafId` stays null and `_listening` stays true —
+	* every consumer on the page dies permanently, from one bad callback. Report
+	* and carry on instead.
+	* @param {*} fn - Callback candidate; ignored unless it is a function
+	* @param {*} [arg] - Single argument to pass
+	* @returns {*} The callback's return value, or undefined
+	*/
+	function safeCall(fn, arg) {
+		if (typeof fn !== "function") return void 0;
+		try {
+			return fn(arg);
+		} catch (error) {
+			console.error(error);
+			return;
+		}
+	}
+	var ScrollHandler = {
+		/** @type {Array<object>} Subscriptions, in subscription order. */
+		_subs: [],
+		_listening: false,
+		_rafId: null,
+		_idleTimer: null,
+		/** rAF timestamp of the previous frame; 0 while the loop is asleep. */
+		_lastFrameTime: 0,
+		/** Clamped y the FRAME delta is measured from. */
+		_lastScrollY: 0,
+		/** Clamped y the per-EVENT velocity delta is measured from. */
+		_lastEventY: 0,
+		/** Clock time of the previous scroll event, for the EMA's own dt. */
+		_lastEventTime: 0,
+		_maxScrollY: 0,
+		_velocity: 0,
+		_quietUntil: 0,
+		_lastWidth: 0,
+		/** A rest is owed to subscribers — movement has happened since the last one. */
+		_restPending: false,
+		/** The next scroll is a restored position, not a gesture. */
+		_rebaseOnNextScroll: false,
+		/** @type {object | null | undefined} undefined = not resolved yet. */
+		_rmq: void 0,
+		handlers: {},
+		/** @returns {number} Current scroll position, clamped to [0, maxScrollY]. */
+		get y() {
+			return this._lastScrollY;
+		},
+		/** @returns {number} Smoothed scroll velocity in px, clamped to ±100. */
+		get velocity() {
+			return this._velocity;
+		},
+		/** @returns {boolean} Whether the user asked for reduced motion. */
+		get reducedMotion() {
+			const query = this._motionQuery();
+			return query ? !!query.matches : false;
+		},
+		/** @returns {number} The largest legal scroll position, from the cache. */
+		get maxScrollY() {
+			return this._maxScrollY;
+		},
+		/**
+		* Subscribes to the scroll signal. Every callback is optional.
+		*
+		* The first subscription attaches the window listeners; the last
+		* unsubscription detaches all of them, so an idle page holds nothing.
+		* @param {object} [callbacks]
+		* @param {(packet: object) => (boolean | void)} [callbacks.frame] - Per
+		*   frame while the loop is awake. Return true to request another frame.
+		* @param {() => void} [callbacks.rest] - True scroll rest.
+		* @param {(reason: string) => void} [callbacks.rebase] - The position was
+		*   adopted with no gesture: 'restore' | 'resize' | 'manual'.
+		* @param {(metrics: object) => void} [callbacks.resize] - After a viewport
+		*   change, with `{ currentHeight, stableHeight }`.
+		* @returns {{ tick: () => void, unsubscribe: () => void }}
+		*/
+		subscribe(callbacks = {}) {
+			const _ = this;
+			const sub = {
+				frame: callbacks.frame,
+				rest: callbacks.rest,
+				rebase: callbacks.rebase,
+				resize: callbacks.resize,
+				active: true,
+				/** Wakes the loop without a scroll — observers, attribute changes. */
+				tick: () => _.tick(),
+				unsubscribe: () => _._unsubscribe(sub)
+			};
+			_._subs.push(sub);
+			if (_._subs.length === 1) _._start();
+			_.tick();
+			return sub;
+		},
+		/**
+		* Re-anchors scroll tracking to the current position, producing no delta on
+		* the next frame. Consumers call this from their own `refresh()` paths.
+		* @param {string} [reason='manual'] - 'restore' | 'resize' | 'manual'
+		*/
+		rebase(reason = "manual") {
+			const _ = this;
+			_._refreshMaxScroll();
+			const y = clamp(_._rawY(), 0, _._maxScrollY);
+			_._lastScrollY = y;
+			_._lastEventY = y;
+			_._emit("rebase", reason);
+			_.tick();
+		},
+		/**
+		* Opens a window in which scroll deltas are reported as zero. Public because
+		* a consumer that knows it is about to move the page (a programmatic scroll,
+		* a layout swap) can suppress the phantom gesture that follows.
+		*/
+		quiet() {
+			this._quietUntil = this._now() + 100;
+		},
+		/** Wakes the rAF loop without a scroll. */
+		tick() {
+			const _ = this;
+			if (!_._listening) return;
+			if (_._rafId !== null) return;
+			if (typeof requestAnimationFrame !== "function") return;
+			_._rafId = requestAnimationFrame(_.handlers.frame);
+		},
+		/**
+		* @param {object} sub - The subscription record
+		*/
+		_unsubscribe(sub) {
+			const _ = this;
+			if (!sub.active) return;
+			sub.active = false;
+			const index = _._subs.indexOf(sub);
+			if (index !== -1) _._subs.splice(index, 1);
+			if (_._subs.length === 0) _._stop();
+		},
+		_start() {
+			const _ = this;
+			if (_._listening) return;
+			ViewportMetrics.init();
+			ViewportMetrics.refresh();
+			const h = _.handlers;
+			h.frame = h.frame || _.onFrame.bind(_);
+			h.scroll = h.scroll || _.onScroll.bind(_);
+			h.rest = h.rest || _.onRest.bind(_);
+			h.resize = h.resize || _.onResize.bind(_);
+			h.restore = h.restore || _.onRestore.bind(_);
+			h.motionPreference = h.motionPreference || _.onMotionPreference.bind(_);
+			window.addEventListener("scroll", h.scroll, { passive: true });
+			window.addEventListener("scrollend", h.rest, { passive: true });
+			window.addEventListener("resize", h.resize, { passive: true });
+			window.visualViewport?.addEventListener("resize", h.resize, { passive: true });
+			window.addEventListener("load", h.restore, { passive: true });
+			window.addEventListener("pageshow", h.restore, { passive: true });
+			_._motionQuery()?.addEventListener?.("change", h.motionPreference);
+			_._listening = true;
+			_._refreshMaxScroll();
+			_._lastScrollY = _._lastEventY = clamp(_._rawY(), 0, _._maxScrollY);
+			_._lastWidth = _._width();
+			_._lastEventTime = 0;
+			_._lastFrameTime = 0;
+			_._rebaseOnNextScroll = typeof document !== "undefined" && document.readyState !== "complete";
+		},
+		_stop() {
+			const _ = this;
+			const h = _.handlers;
+			if (_._listening) {
+				window.removeEventListener("scroll", h.scroll);
+				window.removeEventListener("scrollend", h.rest);
+				window.removeEventListener("resize", h.resize);
+				window.visualViewport?.removeEventListener("resize", h.resize);
+				window.removeEventListener("load", h.restore);
+				window.removeEventListener("pageshow", h.restore);
+				_._motionQuery()?.removeEventListener?.("change", h.motionPreference);
+			}
+			clearTimeout(_._idleTimer);
+			if (_._rafId !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(_._rafId);
+			_._idleTimer = null;
+			_._rafId = null;
+			_._listening = false;
+			_._velocity = 0;
+			_._lastFrameTime = 0;
+			_._lastEventTime = 0;
+			_._quietUntil = 0;
+			_._restPending = false;
+			_._rebaseOnNextScroll = false;
+		},
+		onScroll() {
+			const _ = this;
+			const now = _._now();
+			if (_._rebaseOnNextScroll) {
+				_._rebaseOnNextScroll = false;
+				_.rebase("restore");
+			} else if (!_._restPending) _._refreshMaxScroll();
+			const raw = _._rawY();
+			if (raw > _._maxScrollY) _._refreshMaxScroll();
+			const y = clamp(raw, 0, _._maxScrollY);
+			const delta = now < _._quietUntil ? 0 : y - _._lastEventY;
+			_._lastEventY = y;
+			if (_.reducedMotion) _._velocity = 0;
+			else {
+				const eventDt = _._lastEventTime > 0 ? clamp(now - _._lastEventTime, 0, 64) : REFERENCE_FRAME_MS;
+				const factor = 1 - Math.exp(-eventDt / EMA_TAU);
+				_._velocity = clamp(_._velocity + (delta - _._velocity) * factor, -100, 100);
+			}
+			_._lastEventTime = now;
+			_._armIdle();
+			_.tick();
+		},
+		/**
+		* True scroll rest. Reached from native `scrollend` and from the IDLE_MS
+		* fallback timer; both land here and the work is idempotent, so whichever
+		* arrives first reports rest and the other is a no-op.
+		*/
+		onRest() {
+			const _ = this;
+			clearTimeout(_._idleTimer);
+			_._idleTimer = null;
+			if (!_._restPending) return;
+			_._restPending = false;
+			_._emit("rest");
+			_.tick();
+		},
+		/** Scroll restoration / bfcache return: adopt the position, no delta. */
+		onRestore() {
+			this._rebaseOnNextScroll = false;
+			this.rebase("restore");
+		},
+		onResize() {
+			const _ = this;
+			const width = _._width();
+			const widthChanged = width !== _._lastWidth;
+			_._lastWidth = width;
+			const refreshed = ViewportMetrics.refresh();
+			const metrics = {
+				currentHeight: refreshed.currentHeight,
+				stableHeight: refreshed.stableHeight
+			};
+			_._refreshMaxScroll();
+			if (widthChanged) {
+				_.quiet();
+				_.rebase("resize");
+			}
+			_._emit("resize", metrics);
+			_.tick();
+		},
+		onMotionPreference() {
+			this._velocity = 0;
+			this.tick();
+		},
+		_armIdle() {
+			const _ = this;
+			_._restPending = true;
+			clearTimeout(_._idleTimer);
+			_._idleTimer = setTimeout(_.handlers.rest, 120);
+		},
+		/**
+		* One frame. Reads first, computes, then dispatches — every subscriber sees
+		* the same numbers, and no callback can invalidate a read for the next one.
+		* @param {number} now - rAF timestamp
+		*/
+		onFrame(now) {
+			const _ = this;
+			_._rafId = null;
+			const rawY = _._rawY();
+			if (rawY > _._maxScrollY) _._refreshMaxScroll();
+			const y = clamp(rawY, 0, _._maxScrollY);
+			const quiet = now < _._quietUntil;
+			let delta = y - _._lastScrollY;
+			_._lastScrollY = y;
+			if (quiet) delta = 0;
+			const dt = _._lastFrameTime > 0 ? clamp(now - _._lastFrameTime, 0, 64) : 16;
+			_._lastFrameTime = now;
+			const reduced = _.reducedMotion;
+			if (delta !== 0) _._armIdle();
+			if (reduced) _._velocity = 0;
+			else {
+				_._velocity *= Math.exp(-dt / VELOCITY_DECAY_TAU);
+				if (Math.abs(_._velocity) < .01) _._velocity = 0;
+			}
+			const packet = {
+				y,
+				rawY,
+				delta,
+				velocity: _._velocity,
+				dt,
+				now,
+				quiet,
+				reducedMotion: reduced
+			};
+			let wantsFrame = false;
+			const subs = _._subs.slice();
+			for (const sub of subs) {
+				if (!sub.active) continue;
+				if (safeCall(sub.frame, packet) === true) wantsFrame = true;
+			}
+			if (_._velocity !== 0 || delta !== 0 || wantsFrame) _.tick();
+			else _._lastFrameTime = 0;
+		},
+		/**
+		* @param {string} name - Callback name on the subscription record
+		* @param {*} [arg] - Single argument to pass
+		*/
+		_emit(name, arg) {
+			const subs = this._subs.slice();
+			for (const sub of subs) {
+				if (!sub.active) continue;
+				safeCall(sub[name], arg);
+			}
+		},
+		_refreshMaxScroll() {
+			const doc = typeof document !== "undefined" ? document.documentElement : null;
+			const height = doc ? doc.scrollHeight : 0;
+			const viewport = typeof window !== "undefined" ? window.innerHeight || 0 : 0;
+			this._maxScrollY = Math.max(0, height - viewport);
+		},
+		/** @returns {number} Unclamped `window.scrollY`. */
+		_rawY() {
+			const y = typeof window === "undefined" ? 0 : window.scrollY;
+			return Number.isFinite(y) ? y : 0;
+		},
+		/** @returns {number} Layout viewport width, the resize classifier's input. */
+		_width() {
+			return typeof window === "undefined" ? 0 : window.innerWidth || 0;
+		},
+		/**
+		* `performance.now()` shares its time origin with the rAF timestamp, so the
+		* quiet window (opened from an event, tested from a frame) can compare the
+		* two directly.
+		* @returns {number} Milliseconds on the shared clock
+		*/
+		_now() {
+			return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+		},
+		/**
+		* Resolved once, at first use rather than at import — the module must be
+		* importable without a DOM, and a test needs to stub `matchMedia` before it
+		* is read.
+		* @returns {object | null} The media query list, or null where unsupported
+		*/
+		_motionQuery() {
+			if (this._rmq === void 0) this._rmq = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+			return this._rmq;
+		},
+		/** Test hook: tear everything down and forget every cached global. */
+		_reset() {
+			const _ = this;
+			for (const sub of _._subs.slice()) sub.active = false;
+			_._subs.length = 0;
+			_._stop();
+			_.handlers = {};
+			_._rmq = void 0;
+			_._lastScrollY = 0;
+			_._lastEventY = 0;
+			_._maxScrollY = 0;
+			_._lastWidth = 0;
+		}
+	};
+	var SHOW_DURATION_SCALE = .85;
+	var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 	var ScrollEngine = {
 		header: null,
 		riders: /* @__PURE__ */ new Set(),
 		offset: 0,
+		published: 0,
 		motion: "idle",
-		lastScrollY: 0,
-		maxScrollY: 0,
+		y: 0,
 		lastWritten: null,
-		resizeUntil: 0,
 		reducedAnchor: 0,
 		revealAnchor: 0,
-		rebaseOnNextScroll: false,
 		stopsDirty: false,
+		restDue: false,
 		settle: null,
-		rafId: null,
-		idleTimer: null,
-		listening: false,
+		/** @type {object | null} The ScrollHandler subscription. */
+		sub: null,
 		pendingEvents: [],
 		state: {
 			scroll: null,
@@ -102,6 +550,21 @@
 			locked: null
 		},
 		handlers: {},
+		/**
+		* The offset CSS is currently resolving against — the last value actually
+		* WRITTEN to `--header-group-offset`, not the raw one just computed.
+		*
+		* Everything that takes an applied transform back OUT of a measured rect has
+		* to use this. The two numbers are close with smoothing off (they differ by
+		* the write epsilon, and by a re-clamp that lands between frames) and openly
+		* different with it on, where the raw offset runs 1:1 while the published one
+		* eases behind it. Subtracting a translate the browser has not applied is how
+		* the pinned test starts oscillating and riders start flickering.
+		* @returns {number} Applied offset in px
+		*/
+		get appliedOffset() {
+			return this.lastWritten === null ? 0 : this.lastWritten;
+		},
 		/**
 		* Registers the single <sticky-header>. A second host is rejected — the
 		* engine writes one global offset, so two would fight over it.
@@ -115,13 +578,14 @@
 			}
 			this.header = header;
 			this.offset = 0;
+			this.published = 0;
 			this.lastWritten = null;
 			this.settle = null;
 			this.motion = "idle";
 			this.revealAnchor = 0;
+			this.restDue = false;
 			this.start();
-			this.rebase();
-			this.rebaseOnNextScroll = document.readyState !== "complete";
+			ScrollHandler.rebase();
 			this.tick();
 			return true;
 		},
@@ -133,8 +597,10 @@
 			if (this.header !== header) return;
 			this.header = null;
 			this.offset = 0;
+			this.published = 0;
 			this.settle = null;
 			this.motion = "idle";
+			this.restDue = false;
 			this.pendingEvents.length = 0;
 			this._clearBody();
 			if (!this.riders.size) this.stop();
@@ -156,125 +622,99 @@
 			this.riders.delete(rider);
 			if (!this.riders.size && !this.header) this.stop();
 		},
+		/** Subscribes to the scroll signal. The first consumer starts the handler. */
 		start() {
-			if (this.listening) return;
 			const _ = this;
-			_.handlers.scroll = _.handlers.scroll || _.onScroll.bind(_);
-			_.handlers.scrollEnd = _.handlers.scrollEnd || _.onScrollIdle.bind(_);
-			_.handlers.resize = _.handlers.resize || _.onResize.bind(_);
+			if (_.sub) return;
 			_.handlers.frame = _.handlers.frame || _.onFrame.bind(_);
-			_.handlers.restore = _.handlers.restore || _.onRestore.bind(_);
+			_.handlers.rest = _.handlers.rest || _.onRest.bind(_);
+			_.handlers.rebase = _.handlers.rebase || _.onRebase.bind(_);
+			_.handlers.resize = _.handlers.resize || _.onResize.bind(_);
 			_.handlers.motionPreference = _.handlers.motionPreference || _.onMotionPreference.bind(_);
-			window.addEventListener("scroll", _.handlers.scroll, { passive: true });
-			window.addEventListener("scrollend", _.handlers.scrollEnd, { passive: true });
-			window.addEventListener("resize", _.handlers.resize, { passive: true });
-			window.visualViewport?.addEventListener("resize", _.handlers.resize, { passive: true });
-			window.addEventListener("load", _.handlers.restore, { passive: true });
-			window.addEventListener("pageshow", _.handlers.restore, { passive: true });
 			reducedMotion.addEventListener("change", _.handlers.motionPreference);
-			_.listening = true;
-			_.refreshMaxScroll();
-			_.lastScrollY = clamp(window.scrollY, 0, _.maxScrollY);
-			_.reducedAnchor = _.lastScrollY;
+			_.sub = ScrollHandler.subscribe({
+				frame: _.handlers.frame,
+				rest: _.handlers.rest,
+				rebase: _.handlers.rebase,
+				resize: _.handlers.resize
+			});
+			_.y = ScrollHandler.y;
+			_.reducedAnchor = _.y;
 		},
 		stop() {
 			const _ = this;
-			window.removeEventListener("scroll", _.handlers.scroll);
-			window.removeEventListener("scrollend", _.handlers.scrollEnd);
-			window.removeEventListener("resize", _.handlers.resize);
-			window.visualViewport?.removeEventListener("resize", _.handlers.resize);
-			window.removeEventListener("load", _.handlers.restore);
-			window.removeEventListener("pageshow", _.handlers.restore);
 			reducedMotion.removeEventListener("change", _.handlers.motionPreference);
-			clearTimeout(_.idleTimer);
-			if (_.rafId) cancelAnimationFrame(_.rafId);
-			_.rafId = null;
-			_.idleTimer = null;
-			_.listening = false;
+			_.sub?.unsubscribe();
+			_.sub = null;
 			_.motion = "idle";
+			_.restDue = false;
 		},
 		/** Wakes the rAF loop without a scroll — used by observers and the API. */
 		tick() {
-			if (!this.listening) return;
-			this.handlers.frame = this.handlers.frame || this.onFrame.bind(this);
-			if (!this.rafId) this.rafId = requestAnimationFrame(this.handlers.frame);
+			this.sub?.tick();
 		},
-		/** Re-anchors scroll tracking to the current position, producing no delta. */
+		/**
+		* Re-anchors scroll tracking to the current position, producing no delta.
+		* Goes through the handler, which owns the delta base — the engine's own
+		* anchors are then rebuilt in onRebase(), the single place that does it.
+		*/
 		rebase() {
-			this.refreshMaxScroll();
-			this.lastScrollY = clamp(window.scrollY, 0, this.maxScrollY);
-			this.reducedAnchor = this.lastScrollY;
-			this.revealAnchor = this.lastScrollY + this.offset;
+			ScrollHandler.rebase();
 		},
-		refreshMaxScroll() {
-			this.maxScrollY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-		},
-		/** Opens a quiet window where scroll deltas are ignored (URL-bar storms). */
-		quiet() {
-			this.resizeUntil = performance.now() + 100;
-		},
-		armIdle() {
-			clearTimeout(this.idleTimer);
-			this.idleTimer = setTimeout(this.handlers.scrollEnd, 120);
-		},
-		onScroll() {
-			if (this.rebaseOnNextScroll) {
-				this.rebaseOnNextScroll = false;
-				this.rebase();
-			}
-			if (this.motion !== "settling") this.motion = "tracking";
-			this.armIdle();
-			this.tick();
-		},
-		/** Scroll restoration / bfcache return: adopt the position, stay visible. */
-		onRestore() {
-			this.rebaseOnNextScroll = false;
-			this.rebase();
-			if (this._glideMode()) {
-				this.settle = null;
-				this.motion = "idle";
-				this.revealAnchor = 0;
-			} else this.requestSettle(0, {
+		/**
+		* The position was adopted with no gesture behind it.
+		* @param {string} reason - 'restore' | 'resize' | 'manual'
+		*/
+		onRebase(reason) {
+			const _ = this;
+			_.y = ScrollHandler.y;
+			_.reducedAnchor = _.y;
+			_.revealAnchor = _.y + _.offset;
+			if (reason !== "restore") return;
+			if (_._glideMode()) {
+				_.settle = null;
+				_.motion = "idle";
+				_.revealAnchor = 0;
+			} else _.requestSettle(0, {
 				reason: "show",
 				forced: true
 			});
-			this.tick();
+		},
+		onResize() {
+			this.header?._measure();
+			for (const rider of this.riders) rider._invalidateTop();
 		},
 		onMotionPreference() {
 			this.settle = null;
 			this.motion = "idle";
-			this.rebase();
-			this.tick();
-		},
-		onResize() {
-			this.quiet();
-			this.rebase();
-			this.header?._measure();
-			for (const rider of this.riders) rider._invalidateTop();
-			this.tick();
+			ScrollHandler.rebase();
 		},
 		/**
-		* True scroll rest. Fires from native `scrollend` and from the 120ms
-		* fallback timer; both land here and the work is idempotent, so iOS
-		* momentum (which keeps firing `scroll`) can never settle mid-flick.
+		* True scroll rest, as the handler defines it: movement has actually stopped,
+		* not merely the scroll events. Idempotent — `scrollend` and the handler's
+		* fallback both land here and whichever arrives first does the work.
+		*
+		* No trailing tick: the handler ticks immediately after emitting this.
 		*/
-		onScrollIdle() {
-			clearTimeout(this.idleTimer);
-			if (this.motion === "settling") return;
-			this.motion = "idle";
+		onRest() {
+			const _ = this;
+			if (_.motion === "settling") return;
+			_.motion = "idle";
+			_.restDue = false;
+			_._settleToStop(_._trackable());
+		},
+		/**
+		* Settles onto the stop the current position belongs at. Shared by the two
+		* things that ask that question: a true scroll rest, and a settle that has
+		* just landed somewhere the resting rules would not have chosen.
+		* @param {boolean} trackable - Whether direction-based tracking applies
+		*/
+		_settleToStop(trackable) {
 			const header = this.header;
-			if (!header) {
-				this.tick();
-				return;
-			}
-			const { groupHeight } = header._geometry;
-			if (groupHeight <= 0 || !this._trackable()) {
-				this.tick();
-				return;
-			}
+			if (!header) return;
+			if (header._geometry.groupHeight <= 0 || !trackable) return;
 			const target = this._settleTarget();
 			this.requestSettle(target, { reason: target < this.offset ? "hide" : "show" });
-			this.tick();
 		},
 		/**
 		* The stop an idle mid-page settle commits to. The threshold operates
@@ -296,7 +736,7 @@
 			let target;
 			if (travel <= 0) target = -groupHeight;
 			else target = clamp((upper - this.offset) / travel, 0, 1) > header._config.settleThreshold ? -groupHeight : upper;
-			return Math.max(target, -this.lastScrollY);
+			return Math.max(target, -this.y);
 		},
 		/**
 		* Marks the resting stops stale — a breakpoint change re-resolving which tags
@@ -339,28 +779,30 @@
 		* @param {object} options - `reason` ('show'|'hide') and `forced`
 		*/
 		requestSettle(to, { reason = to < 0 ? "hide" : "show", forced = false } = {}) {
-			const settle = this.settle;
+			const _ = this;
+			if (_.published !== _.offset) _.offset = _.published;
+			const settle = _.settle;
 			if (settle && settle.to === to) {
 				if (forced) settle.forced = true;
 				return;
 			}
-			if (!settle && Math.abs(this.offset - to) <= .05) {
-				this.offset = to;
+			if (!settle && Math.abs(_.offset - to) <= .05) {
+				_.offset = to;
 				return;
 			}
-			const header = this.header;
+			const header = _.header;
 			const config = header ? header._config : null;
 			if (reducedMotion.matches) {
-				this.settle = null;
-				this.offset = to;
-				this.motion = "idle";
-				this.reducedAnchor = this.lastScrollY;
+				_.settle = null;
+				_.offset = to;
+				_.motion = "idle";
+				_.reducedAnchor = _.y;
 				return;
 			}
 			const base = config ? config.settleDuration : 900;
 			const duration = Math.max(1, reason === "show" ? base * SHOW_DURATION_SCALE : base);
-			this.settle = {
-				from: this.offset,
+			_.settle = {
+				from: _.offset,
 				to,
 				reason,
 				forced,
@@ -368,19 +810,18 @@
 				start: null,
 				ease: makeSettleEase(config ? config.settleOvershoot : .05)
 			};
-			this.motion = "settling";
-			this.queueEvent("settle", {
+			_.motion = "settling";
+			_.queueEvent("settle", {
 				target: reason,
-				from: this.settle.from,
+				from: _.settle.from,
 				duration
 			});
-			this.tick();
+			_.tick();
 		},
 		cancelSettle() {
 			if (!this.settle) return;
 			this.settle = null;
 			this.motion = "tracking";
-			this.armIdle();
 		},
 		/**
 		* Re-clamps the offset (and any in-flight settle) into a changed range.
@@ -391,6 +832,7 @@
 		*/
 		reclamp(groupHeight) {
 			this.offset = clamp(this.offset, -groupHeight, 0);
+			this.published = clamp(this.published, -groupHeight, 0);
 			const settle = this.settle;
 			if (!settle) return;
 			settle.to = clamp(settle.to, -groupHeight, 0);
@@ -416,9 +858,12 @@
 		},
 		/**
 		* Whether the group has reached its pinned position. Tested against the
-		* UNtranslated top — `rect.top` already carries the transform, so the offset
-		* has to be taken back out of it or the check oscillates on the show
-		* overshoot, where `offset > 0` drags the rect below `stickyTop`.
+		* UNtranslated top — `rect.top` already carries the transform, so the applied
+		* offset has to be taken back out of it or the check oscillates on the show
+		* overshoot, where a positive offset drags the rect below `stickyTop`.
+		*
+		* It is `appliedOffset`, not the raw one: the rect reflects the last value
+		* CSS was given, which under tracking-smoothing is a different number.
 		*
 		* The host may or may not BE the translating element, though: the documented
 		* `position: fixed` workaround sets `transform: none` here and moves the
@@ -431,14 +876,14 @@
 		* Read per frame rather than cached: the rule can be breakpoint-dependent,
 		* and a cache would have to be refreshed from wherever CSS might change.
 		* It sits beside a rect read either way — in the frame's read phase, or off
-		* it via onScrollIdle → _trackable() — so it adds no thrash of its own.
+		* it via onRest() → _trackable() — so it adds no thrash of its own.
 		* @returns {boolean} True while the group is pinned
 		*/
 		_pinned() {
 			const header = this.header;
 			if (!header) return false;
 			const rect = header.getBoundingClientRect();
-			const applied = getComputedStyle(header).transform === "none" ? 0 : this.offset;
+			const applied = getComputedStyle(header).transform === "none" ? 0 : this.appliedOffset;
 			return rect.top - applied <= header._geometry.stickyTop + .5;
 		},
 		/**
@@ -483,7 +928,7 @@
 			if (header._isLocked()) return false;
 			if (header._geometry.groupHeight <= 0) return false;
 			if (!(pinned === void 0 ? this._pinned() : pinned)) return false;
-			return this.lastScrollY > header._config.revealThreshold;
+			return this.y > header._config.revealThreshold;
 		},
 		/**
 		* The position-based offset: how far the group has travelled past the point
@@ -515,19 +960,19 @@
 				this.offset = settle.to;
 				this.settle = null;
 				this.motion = "idle";
-				this.armIdle();
+				this.restDue = true;
 			}
 		},
-		onFrame(now) {
+		/**
+		* One frame of the scroll signal. Strict read → compute → write.
+		* @param {object} packet - The handler's per-frame packet
+		* @returns {boolean} True to ask the handler for another frame
+		*/
+		onFrame(packet) {
 			const _ = this;
-			_.rafId = null;
-			let y = window.scrollY;
-			if (y > _.maxScrollY) _.refreshMaxScroll();
-			y = clamp(y, 0, _.maxScrollY);
-			let delta = y - _.lastScrollY;
-			_.lastScrollY = y;
-			if (now < _.resizeUntil) delta = 0;
-			if (delta !== 0) _.armIdle();
+			const { y, delta, dt, now } = packet;
+			const reduced = packet.reducedMotion;
+			_.y = y;
 			const header = _.header;
 			header?._readReveal();
 			const glide = _._glideMode();
@@ -540,7 +985,11 @@
 					_.stopsDirty = false;
 					_._applyStops(y, glide, trackable);
 				}
-				if (reducedMotion.matches) {
+				if (_.restDue && delta === 0 && _.motion !== "settling") {
+					_.restDue = false;
+					_._settleToStop(trackable);
+				}
+				if (reduced) {
 					if (glide) _.offset = _._glideOffset(y, pinned, topOnlyHeight);
 					else if (!trackable) {
 						_.offset = 0;
@@ -576,19 +1025,25 @@
 				}
 				if (_.offset < -y) _.offset = -y;
 				if (!glide) _.revealAnchor = y + _.offset;
+				const tau = _.motion === "tracking" ? header._config.trackingSmoothing : 0;
+				let publish = expApproach(_.published, _.offset, dt, tau);
+				if (tau > 0) {
+					publish = clamp(publish, -groupHeight, 0);
+					if (publish < -y) publish = -y;
+				}
+				_.published = publish;
 			}
 			header?._writeReveal();
 			_._writeOffset();
 			_._syncState(y);
 			_._writeRiders(riderReads);
 			_.flushEvents();
-			if (_.motion === "settling" || _.motion === "tracking" && delta !== 0) _.tick();
+			return _.motion === "settling" || _.motion === "tracking" && delta !== 0 || _.restDue || Math.abs(_.published - _.offset) > .05;
 		},
 		_writeOffset() {
 			if (!this.header) return;
-			const offset = this.offset;
-			const settled = this.motion === "idle";
-			if (this.lastWritten !== null && !settled && Math.abs(offset - this.lastWritten) <= .05) return;
+			const offset = this.published;
+			if (this.lastWritten !== null && this.motion === "settling" && Math.abs(offset - this.lastWritten) <= .05) return;
 			if (this.lastWritten === offset) return;
 			this.lastWritten = offset;
 			document.body.style.setProperty("--header-group-offset", `${offset}px`);
@@ -635,7 +1090,7 @@
 		},
 		_readRiders() {
 			if (!this.riders.size) return null;
-			const offset = this.header ? this.offset : 0;
+			const offset = this.header ? this.appliedOffset : 0;
 			const reads = [];
 			for (const rider of this.riders) {
 				if (rider.hasAttribute("disabled")) {
@@ -687,7 +1142,8 @@
 		revealThreshold: 100,
 		settleThreshold: .5,
 		settleDuration: 900,
-		settleOvershoot: .05
+		settleOvershoot: .05,
+		trackingSmoothing: 0
 	};
 	var HIDE_MODES = [
 		"none",
@@ -756,6 +1212,7 @@
 				"settle-threshold",
 				"settle-duration",
 				"settle-overshoot",
+				"tracking-smoothing",
 				"lock",
 				"locked",
 				"disabled",
@@ -886,7 +1343,8 @@
 				revealThreshold: parseNumber(_.getAttribute("reveal-threshold"), DEFAULTS.revealThreshold, 0, 1e5),
 				settleThreshold: parseNumber(_.getAttribute("settle-threshold"), DEFAULTS.settleThreshold, 0, 1),
 				settleDuration: parseNumber(_.getAttribute("settle-duration"), DEFAULTS.settleDuration, 1, 5e3),
-				settleOvershoot: parseNumber(_.getAttribute("settle-overshoot"), DEFAULTS.settleOvershoot, 0, .2)
+				settleOvershoot: parseNumber(_.getAttribute("settle-overshoot"), DEFAULTS.settleOvershoot, 0, .2),
+				trackingSmoothing: parseNumber(_.getAttribute("tracking-smoothing"), DEFAULTS.trackingSmoothing, 0, 1e3)
 			};
 		}
 		#observeMedia() {
@@ -1033,7 +1491,7 @@
 			if (!targets.length) return 0;
 			const isDesktop = _.#mediaQuery ? _.#mediaQuery.matches : true;
 			const hostTop = _.getBoundingClientRect().top;
-			const carried = getComputedStyle(_).transform === "none" ? ScrollEngine.offset : 0;
+			const carried = getComputedStyle(_).transform === "none" ? ScrollEngine.appliedOffset : 0;
 			let boundary = null;
 			for (const element of targets) {
 				if (!_.#revealApplies(element.getAttribute(REVEAL_ATTRIBUTE), isDesktop)) continue;

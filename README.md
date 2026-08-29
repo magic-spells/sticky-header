@@ -1,6 +1,6 @@
 # Sticky Header
 
-A sticky header that **follows your scroll**. Instead of flipping between two states, the header translates at exactly the rate you scroll — glued to your finger — and only when scrolling stops does it settle to fully shown or fully hidden, whichever side of the commit threshold it landed on. Ships with `<sticky-content>` so other sticky elements ride the same offset. 6.1 kB JS gzip, 0.3 kB CSS gzip, no Shadow DOM.
+A sticky header that **follows your scroll**. Instead of flipping between two states, the header translates at exactly the rate you scroll — glued to your finger — and only when scrolling stops does it settle to fully shown or fully hidden, whichever side of the commit threshold it landed on. Ships with `<sticky-content>` so other sticky elements ride the same offset. 7.9 kB JS gzip, 0.3 kB CSS gzip, no dependencies, no Shadow DOM.
 
 [**Demo**](https://magic-spells.github.io/sticky-header/demo/)
 
@@ -167,6 +167,7 @@ It is gated to hover-capable fine pointers (`(hover: hover) and (pointer: fine)`
 | `settle-threshold` | `0`–`1`                          | `0.5`   | How far into the gap between the two adjacent stops an idle settle commits to the hidden one rather than back to the reveal stop (with nothing tagged, that gap is the whole travel and the other stop is fully shown) |
 | `settle-duration`  | ms                               | `900`   | Hide settle duration; the show settle uses 85% of it                                                                                                                                                                   |
 | `settle-overshoot` | `0`–`0.2`                        | `0.05`  | Bounce amplitude. `0` swaps to a critically damped curve — no bounce                                                                                                                                                   |
+| `tracking-smoothing` | ms                             | `0`     | Softens the tracking only. A time constant easing the published offset toward the 1:1 value while you scroll; `0` is off and exactly 1:1. See [Tracking smoothing](#tracking-smoothing)                                |
 | `hover-lock`       | boolean                          | —       | While the pointer is anywhere in the header group, don't hide on scroll                                                                                                                                                |
 | `lock`             | CSS selector                     | —       | Extra force-show condition, e.g. an open menu panel. `dialog[open]` is built in                                                                                                                                        |
 | `locked`           | boolean                          | —       | Force fully visible                                                                                                                                                                                                    |
@@ -243,6 +244,8 @@ All bubble, all dispatched on `<sticky-header>`.
 
 There are deliberately **no per-frame events**. For frame-accurate work read the `offset` / `progress` properties from your own rAF loop, or read the CSS variable.
 
+Internally the whole package runs on one scroll-signal layer: a single set of window listeners and a single rAF loop that terminates itself the moment nothing is moving. A page sitting still costs no frames at all.
+
 ## Properties and methods
 
 | Member                | Description                                                                                                                                                                   |
@@ -302,7 +305,37 @@ transition-timing-function: linear(
 );
 ```
 
+### Tracking smoothing
+
+Tracking is 1:1 by default — the header moves exactly as far as you scrolled, which is what makes it feel glued to your finger. On a device whose `scrollY` arrives coarsely quantized, though, 1:1 faithfully reproduces that coarseness as a slightly steppy header.
+
+`tracking-smoothing` is the dial for that. It takes a time constant in milliseconds and eases the _published_ offset toward the 1:1 value while you scroll:
+
+```html
+<sticky-header tracking-smoothing="35">…</sticky-header>
+```
+
+Roughly, 20ms takes the edge off, 35ms is visibly softer, and past about 50ms the header starts to feel like it is lagging behind your finger rather than following it. The default `0` turns it off completely and restores exact 1:1.
+
+It is deliberately narrow — smoothing applies **only** while tracking, and only to the number written to `--header-group-offset`:
+
+- Settles are never smoothed. They are already a tween, and easing an ease twice is what makes motion feel mushy.
+- Every resting stop is still landed on **exactly**. The published value snaps to the real one at rest, so nothing parks a fraction of a pixel short.
+- Thresholds, the commit decision and the reveal boundary all still run on the true 1:1 offset, so smoothing changes how the header looks, never where it decides to stop.
+
+Leave it off unless you are looking at a specific device that needs it.
+
 `prefers-reduced-motion: reduce` drops tracking and tweening entirely: the offset flips between whichever two stops currently apply past a 5px direction change, like a classic two-state header. Where `hide-on-scroll` is off and a reveal boundary exists the motion is already a direct position mapping, so it is unchanged.
+
+## On mobile
+
+Mobile browsers make scroll harder than it looks, and the component's scroll signal is normalized for it internally — there is nothing to configure here, but it is worth knowing what it handles:
+
+- **The URL bar and the soft keyboard don't freeze tracking.** Both fire `resize` with only the height changed. Your scroll position is still genuinely yours across one of those, so the header keeps tracking normally through it. (This is a deliberate correction: quieting height-only resizes was the obvious first implementation, and on a real iPhone it backfired badly — iOS toggles the URL bar on nearly every change of scroll direction, so every reversal threw away real movement and stalled the header for the best part of a hundred pixels.)
+- **Rotation and real resizes re-anchor instead.** When the _width_ changes, layout has genuinely moved and any movement measured across it is meaningless, so the position is re-adopted with no delta rather than consumed as a gesture.
+- **Rubber-band scrolling can't corrupt the geometry.** Position is clamped to the real scrollable range, so over-scrolling at either end never feeds a negative or over-run position into the maths.
+- **Momentum flicks settle only once they have actually stopped.** Rest is detected from movement rather than from scroll events, which stop firing well before an iOS flick finishes gliding.
+- **Returning to a backgrounded tab doesn't teleport the header.** The first frame back is capped so a multi-minute gap can't become one enormous animation step.
 
 ## Gotchas
 

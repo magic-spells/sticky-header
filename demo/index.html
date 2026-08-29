@@ -599,6 +599,9 @@
 				z-index: 500;
 				width: 20rem;
 				max-height: calc(100vh - 2rem);
+				/* iOS: 100vh is the LARGE viewport — anchored to bottom, the overflow
+				   pushes the head (and its collapse toggle) off the top of the screen */
+				max-height: calc(100svh - 2rem);
 				display: flex;
 				flex-direction: column;
 				background: rgba(15, 14, 20, 0.94);
@@ -1435,6 +1438,16 @@
 					<input type="range" id="overshoot" min="0" max="0.2" step="0.005" value="0.05" />
 				</div>
 
+				<div class="field">
+					<span class="group-label">tracking-smoothing</span>
+					<div class="radios" id="smoothing-modes">
+						<label><input type="radio" name="smoothing" value="0" checked />off</label>
+						<label><input type="radio" name="smoothing" value="20" />20ms</label>
+						<label><input type="radio" name="smoothing" value="35" />35ms</label>
+						<label><input type="radio" name="smoothing" value="50" />50ms</label>
+					</div>
+				</div>
+
 				<div class="divider"></div>
 
 				<div class="buttons">
@@ -1520,6 +1533,13 @@
 			bindSlider('threshold', 'settle-threshold', (v) => Number(v).toFixed(2));
 			bindSlider('duration', 'settle-duration', (v) => `${v}ms`);
 			bindSlider('overshoot', 'settle-overshoot', (v) => Number(v).toFixed(3));
+
+			// the lever being A/B tested on a real phone
+			document.getElementById('smoothing-modes').addEventListener('change', (e) => {
+				const ms = Number(e.target.value);
+				if (ms > 0) header.setAttribute('tracking-smoothing', String(ms));
+				else header.removeAttribute('tracking-smoothing');
+			});
 
 			// ---- buttons ----
 

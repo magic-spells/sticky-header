@@ -107,8 +107,13 @@ async function main() {
 		const server = await createServer({
 			configFile: false,
 			root: 'demo',
-			server: { port: 3090, open: true, strictPort: false },
-			plugins: [liveReload('demo/dist')],
+			server: { port: 3090, open: true, strictPort: false, host: true },
+			// raw-serve JS as well as CSS: Vite's cached transform of files the
+			// module graph doesn't own is never invalidated, so the externally
+			// rebuilt bundles go stale behind it (the plugin README, quirk #2)
+			plugins: [
+				liveReload({ distDir: 'demo/dist', extensions: ['.css', '.js', '.mjs', '.map'] }),
+			],
 		});
 		await server.listen();
 		server.printUrls();
