@@ -1,8 +1,16 @@
 /*
-  Scroll handler — the shared scroll SIGNAL for the magic-spells ecosystem.
+  Scroll handler — sticky-header's internal scroll SIGNAL layer.
 
   A module singleton: one set of window listeners, one self-terminating rAF
   loop, one normalized scroll position, shared by every consumer on the page.
+
+  This started life as a standalone `@magic-spells/scroll-handler` package and
+  was folded in permanently on 2026-08-28, sticky-header being its only
+  consumer. There is no external package to stay in sync with — edit this file
+  like any other source file. The module BOUNDARY is still kept deliberately
+  clean so it could be extracted again if a second consumer ever appears: it
+  imports nothing from the rest of `src/` and knows nothing about headers,
+  elements or CSS variables. `test/` covers this layer and pins its surface.
 
   It owns no visuals. It writes no CSS variables, touches no elements, emits no
   DOM events and has zero runtime dependencies. Consumers subscribe with plain
